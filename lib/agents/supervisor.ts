@@ -1,3 +1,5 @@
+import { runDataQualityAgent, type DataQualityResult } from '@/lib/agents/data-quality';
+import { runGovernanceAgent, type GovernanceResult } from '@/lib/agents/governance';
 import { agentForJob, agentsById, type AgentId } from '@/lib/agents/registry';
 import { persistAutonomousResult } from '@/lib/autonomy/audit';
 import { executeAutonomousJob, type AutonomousJobResult } from '@/lib/autonomy/executor';
@@ -28,18 +30,15 @@ export interface SupervisorRunResult {
   degraded: number;
   skipped: number;
   escalations: string[];
+  controls: {
+    governance: GovernanceResult;
+    dataQuality: DataQualityResult;
+  };
 }
 
 const phaseOrder: IntelligenceJobName[] = [
-  'liquidity-pulse',
-  'social-radar',
-  'sec-filings',
-  'share-structure',
-  'finra-actions',
-  'risk-gateway',
-  'market-regime',
-  'gem-discovery',
-  'model-learning',
+  'liquidity-pulse', 'social-radar', 'sec-filings', 'share-structure', 'finra-actions',
+  'risk-gateway', 'market-regime', 'gem-discovery', 'model-learning',
 ];
 
 function sortJobs(jobs: IntelligenceJobDefinition[]) {
@@ -94,13 +93,20 @@ export async function runSupervisor(
   const startedAt = new Date();
   const readiness = getProviderReadiness();
   const guardrails = evaluateAutonomyGuardrails();
+  const governance = runGovernanceAgent();
+  const dataQuality = await runDataQualityAgent();
   const selected = requestedJobs?.length
     ? intelligenceJobs.filter((job) => requestedJobs.includes(job.name))
     : jobsDueAt(date);
   const assignments: AgentAssignmentResult[] = [];
   const escalations: string[] = [];
 
-  if (!guardrails.researchExecutionAllowed) {
+  if (governance.status === 'degraded') escalations.push(`governance: ${governance.authorityViolations.join(', ')}`);
+  if (dataQuality.status !== 'healthy') escalations.push(`data-quality: ${dataQuality.staleDomains.join(', ')}`);
+
+  const supervisorHalted = !guardrails.researchExecutionAllowed || governance.status === 'degraded';
+  if (supervisorHalted) {
+    const reasons = [...guardrails.reasons, ...governance.authorityViolations];
     for (const job of sortJobs(selected)) {
       const agent = agentForJob(job.name);
       assignments.push({
@@ -109,7 +115,7 @@ export async function runSupervisor(
         job: job.name,
         status: 'skipped',
         actionCount: 0,
-        message: `Supervisor halt: ${guardrails.reasons.join(', ')}.`,
+        message: `Supervisor halt: ${reasons.join(', ')}.`,
         persisted: false,
       });
     }
@@ -118,16 +124,17 @@ export async function runSupervisor(
       const result = await executeAutonomousJob(job);
       const audit = await persistAutonomousResult(result, trigger);
       assignments.push(assignmentFromResult(result, audit.persisted));
-      if (result.status === 'degraded' && job.priority === 'critical') {
-        escalations.push(`${job.name}: ${result.message}`);
-      }
+      if (result.status === 'degraded' && job.priority === 'critical') escalations.push(`${job.name}: ${result.message}`);
     }
 
     const discoveryRan = assignments.some((assignment) => assignment.job === 'gem-discovery' && assignment.status !== 'skipped');
-    if (discoveryRan && readiness.database.configured) {
+    const marketFreshEnough = dataQuality.status !== 'offline' && !dataQuality.staleDomains.includes('market');
+    if (discoveryRan && readiness.database.configured && marketFreshEnough) {
       const vector = await runOpportunityDirector();
       assignments.push(vector);
       if (vector.status !== 'completed') escalations.push(`opportunity-director: ${vector.message}`);
+    } else if (discoveryRan && !marketFreshEnough) {
+      escalations.push('opportunity-director: skipped because Custodian marked market data stale or offline.');
     }
   }
 
@@ -143,5 +150,6 @@ export async function runSupervisor(
     degraded: assignments.filter((assignment) => assignment.status === 'degraded').length,
     skipped: assignments.filter((assignment) => assignment.status === 'skipped').length,
     escalations,
+    controls: { governance, dataQuality },
   };
 }

@@ -125,3 +125,26 @@ export const decisionLogs = pgTable("decision_logs", {
   rationale: jsonb("rationale"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
+
+export const autonomousActions = pgTable("autonomous_actions", {
+  id: text("id").primaryKey(),
+  workflowRunId: text("workflow_run_id").references(() => workflowRuns.id),
+  job: text("job").notNull(),
+  actionType: text("action_type").notNull(),
+  status: text("status").notNull(),
+  shadowOnly: boolean("shadow_only").notNull().default(true),
+  providerRequirements: jsonb("provider_requirements").notNull(),
+  providerState: jsonb("provider_state").notNull(),
+  payload: jsonb("payload"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("autonomous_action_job_time_idx").on(table.job, table.createdAt)]);
+
+export const systemEvents = pgTable("system_events", {
+  id: text("id").primaryKey(),
+  category: text("category").notNull(),
+  severity: text("severity").notNull(),
+  source: text("source").notNull(),
+  message: text("message").notNull(),
+  payload: jsonb("payload"),
+  observedAt: timestamp("observed_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => [index("system_event_category_time_idx").on(table.category, table.observedAt)]);

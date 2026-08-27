@@ -35,6 +35,7 @@ test('production readiness, performance, and promotion gates are visible and fai
   await expect(page.getByRole('heading', { name: 'Shadow Performance' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shadow Promotion Gate' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mercury Intelligence Lab' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Market Feed Fabric' })).toBeVisible();
 
   const response = await request.get('/api/activation/readiness');
   expect(response.ok()).toBeTruthy();
@@ -96,6 +97,28 @@ test('shadow performance remains explicit when persistence is unavailable', asyn
   expect(json.capitalExecutionEnabled).toBe(false);
   expect(json.horizons.m15.count).toBe(0);
   expect(json.horizons.m60.count).toBe(0);
+});
+
+test('market provider fabric exposes failover state and protected pulling', async ({ request }) => {
+  const status = await request.get('/api/providers/market/status');
+  expect(status.ok()).toBeTruthy();
+  const statusJson = await status.json();
+  expect(statusJson.mode).toBe('auto');
+  expect(statusJson.capitalExecutionEnabled).toBe(false);
+  expect(statusJson.providers).toHaveLength(2);
+  expect(statusJson.providers.map((item: { name: string }) => item.name)).toEqual(['massive', 'intrinio']);
+  expect(statusJson.providers.every((item: { configured: boolean }) => item.configured === false)).toBeTruthy();
+
+  const unauthorized = await request.post('/api/providers/market/pull');
+  expect(unauthorized.status()).toBe(401);
+
+  const authorized = await request.post('/api/providers/market/pull', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+  });
+  expect(authorized.status()).toBe(503);
+  const json = await authorized.json();
+  expect(json.ok).toBe(false);
+  expect(json.reason).toBe('database_not_configured');
 });
 
 test('institutional research APIs are explicit and fail closed without persistence', async ({ request }) => {

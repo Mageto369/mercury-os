@@ -20,6 +20,8 @@ const socialSources = [
   ["Facebook", "PERMISSION GATE", "Group attention + market confirmation"],
 ] as const;
 
+const cadenceLabel = (minutes: number) => minutes === 1440 ? "daily" : `${minutes}m`;
+
 export default function Home() {
   const opportunities = sampleUniverse
     .map((input) => ({ input, decision: scoreOpportunity(input) }))
@@ -93,7 +95,7 @@ export default function Home() {
           <div className="panel">
             <h2>Autonomous Workflows</h2>
             <div className="sub">Research and scoring run autonomously. Capital execution remains disabled.</div>
-            <div className="list">{intelligenceJobs.slice(0, 6).map(job => <div className="item" key={job.name}><span><b>{job.name.replaceAll("-", " ")}</b><small className="muted">{job.priority} priority</small></span><b>{job.cadence}</b></div>)}</div>
+            <div className="list">{intelligenceJobs.slice(0, 6).map(job => <div className="item" key={job.name}><span><b>{job.name.replaceAll("-", " ")}</b><small className="muted">{job.priority} priority</small></span><b>{cadenceLabel(job.cadenceMinutes)}</b></div>)}</div>
           </div>
           <div className="panel">
             <h2>Data Fabric</h2>

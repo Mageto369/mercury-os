@@ -6,9 +6,9 @@ export interface OpportunityInput {
   symbol: string;
   market: "OTC" | "NASDAQ" | "NYSE" | "AMEX";
   price: number;
-  marketCapUsd?: number;
-  floatShares?: number;
-  avgDollarVolume20d?: number;
+  marketCapUsd: number;
+  floatShares: number;
+  avgDollarVolume20d: number;
   gem: number;
   wave: number;
   catalyst: number;

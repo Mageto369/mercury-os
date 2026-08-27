@@ -1,4 +1,4 @@
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, inArray } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { corporateActions, securities, systemEvents } from '@/lib/db/schema';
 
@@ -23,37 +23,23 @@ export async function runRiskGatewayWorkflow(): Promise<RiskGatewayResult> {
   const cutoff = new Date(Date.now() - cutoffDays * 24 * 60 * 60 * 1000);
 
   const actionRows = await db
-    .select({
-      securityId: corporateActions.securityId,
-      symbol: securities.symbol,
-      type: corporateActions.type,
-      riskScore: corporateActions.riskScore,
-    })
+    .select({ securityId: corporateActions.securityId, symbol: securities.symbol, type: corporateActions.type, riskScore: corporateActions.riskScore })
     .from(corporateActions)
     .innerJoin(securities, eq(corporateActions.securityId, securities.id))
     .where(and(gte(corporateActions.riskScore, 55), gte(corporateActions.observedAt, cutoff)))
     .limit(250);
 
   const dilutionRows = await db
-    .select({
-      securityId: systemEvents.securityId,
-      symbol: securities.symbol,
-      message: systemEvents.message,
-    })
+    .select({ securityId: systemEvents.securityId, symbol: securities.symbol, message: systemEvents.message, category: systemEvents.category })
     .from(systemEvents)
     .innerJoin(securities, eq(systemEvents.securityId, securities.id))
-    .where(and(eq(systemEvents.category, 'filing:dilution'), gte(systemEvents.observedAt, cutoff)))
-    .limit(250);
+    .where(and(inArray(systemEvents.category, ['filing:dilution', 'structure:dilution-change']), gte(systemEvents.observedAt, cutoff)))
+    .limit(500);
 
   const flags = new Map<string, StructuralRiskFlag>();
 
   for (const row of actionRows) {
-    const current = flags.get(row.securityId) ?? {
-      securityId: row.securityId,
-      symbol: row.symbol,
-      reasons: [],
-      maxRiskScore: 0,
-    };
+    const current = flags.get(row.securityId) ?? { securityId: row.securityId, symbol: row.symbol, reasons: [], maxRiskScore: 0 };
     current.reasons.push(`${row.type} corporate action risk ${row.riskScore}`);
     current.maxRiskScore = Math.max(current.maxRiskScore, row.riskScore);
     flags.set(row.securityId, current);
@@ -61,14 +47,9 @@ export async function runRiskGatewayWorkflow(): Promise<RiskGatewayResult> {
 
   for (const row of dilutionRows) {
     if (!row.securityId) continue;
-    const current = flags.get(row.securityId) ?? {
-      securityId: row.securityId,
-      symbol: row.symbol,
-      reasons: [],
-      maxRiskScore: 0,
-    };
+    const current = flags.get(row.securityId) ?? { securityId: row.securityId, symbol: row.symbol, reasons: [], maxRiskScore: 0 };
     current.reasons.push(row.message);
-    current.maxRiskScore = Math.max(current.maxRiskScore, 65);
+    current.maxRiskScore = Math.max(current.maxRiskScore, row.category === 'structure:dilution-change' ? 70 : 65);
     flags.set(row.securityId, current);
   }
 

@@ -53,6 +53,8 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   const healthJson = await health.json();
   expect(healthJson.status).toBe('ok');
   expect(healthJson.service).toBe('mercury-os');
+  expect(healthJson.version).toBe('0.3.1');
+  expect(healthJson.totalProviders).toBe(9);
 
   const pulse = await request.post('/api/control/pulse');
   expect(pulse.ok()).toBeTruthy();
@@ -60,7 +62,12 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(pulseJson.mode).toBe('shadow');
   expect(pulseJson.executionEnabled).toBe(false);
 
-  const cron = await request.get('/api/cron/intelligence');
+  const unauthorizedCron = await request.get('/api/cron/intelligence');
+  expect(unauthorizedCron.status()).toBe(401);
+
+  const cron = await request.get('/api/cron/intelligence', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+  });
   expect(cron.ok()).toBeTruthy();
   const cronJson = await cron.json();
   expect(cronJson.mode).toBe('shadow');

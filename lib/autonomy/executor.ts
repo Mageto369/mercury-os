@@ -1,6 +1,7 @@
 import type { IntelligenceJobDefinition } from '@/lib/workflows/jobs';
 import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers';
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
+import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
 import { runSecFilingsWorkflow } from '@/lib/workflows/sec-filings';
 
 export type AutonomousJobStatus = 'completed' | 'degraded' | 'skipped';
@@ -20,7 +21,7 @@ export interface AutonomousJobResult {
 
 const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'liquidity-pulse': ['marketData'],
-  'risk-gateway': ['marketData'],
+  'risk-gateway': ['database', 'marketData'],
   'social-radar': ['reddit', 'discord', 'telegram', 'facebook'],
   'sec-filings': ['sec', 'database'],
   'market-regime': ['marketData'],
@@ -85,6 +86,37 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
     };
   }
 
+  if (job.name === 'risk-gateway' && readiness.database.configured) {
+    try {
+      const risk = await runRiskGatewayWorkflow();
+      return {
+        name: job.name,
+        status: readiness.marketData.configured ? 'completed' : 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: risk.flagged.length,
+        message: `Structural risk scan flagged ${risk.flagged.length} securities from ${risk.corporateActionsChecked} high-risk corporate actions and ${risk.dilutionEventsChecked} dilution events${readiness.marketData.configured ? '' : '; liquidity confirmation unavailable'}.`,
+      };
+    } catch (error) {
+      return {
+        name: job.name,
+        status: 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: 0,
+        message: `Risk gateway failed safely: ${error instanceof Error ? error.message : 'unknown risk workflow error'}.`,
+      };
+    }
+  }
+
   if (missingProviders.length === 0 && job.name === 'sec-filings') {
     try {
       const sec = await runSecFilingsWorkflow();
@@ -98,7 +130,7 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
         configuredProviders,
         missingProviders,
         actionCount: sec.filingsInserted,
-        message: `SEC ingestion checked ${sec.companiesChecked} companies, observed ${sec.filingsObserved} material filings, inserted ${sec.filingsInserted}${sec.errors.length ? `, with ${sec.errors.length} errors` : ''}.`,
+        message: `SEC ingestion checked ${sec.companiesChecked} companies, observed ${sec.filingsObserved} material filings, inserted ${sec.filingsInserted}, emitted ${sec.signalsCreated} machine signals${sec.errors.length ? `, with ${sec.errors.length} errors` : ''}.`,
       };
     } catch (error) {
       return {

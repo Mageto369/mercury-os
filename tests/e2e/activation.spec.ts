@@ -34,6 +34,7 @@ test('production readiness, performance, and promotion gates are visible and fai
   await expect(page.getByRole('heading', { name: 'Production Readiness' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shadow Performance' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shadow Promotion Gate' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mercury Intelligence Lab' })).toBeVisible();
 
   const response = await request.get('/api/activation/readiness');
   expect(response.ok()).toBeTruthy();
@@ -95,4 +96,56 @@ test('shadow performance remains explicit when persistence is unavailable', asyn
   expect(json.capitalExecutionEnabled).toBe(false);
   expect(json.horizons.m15.count).toBe(0);
   expect(json.horizons.m60.count).toBe(0);
+});
+
+test('institutional research APIs are explicit and fail closed without persistence', async ({ request }) => {
+  const signals = await request.get('/api/research/signals');
+  expect(signals.ok()).toBeTruthy();
+  const signalsJson = await signals.json();
+  expect(signalsJson.mode).toBe('shadow');
+  expect(signalsJson.capitalExecutionEnabled).toBe(false);
+  expect(signalsJson.count).toBeGreaterThanOrEqual(25);
+  expect(signalsJson.families.length).toBeGreaterThanOrEqual(10);
+
+  const evidence = await request.get('/api/performance/evidence');
+  expect(evidence.ok()).toBeTruthy();
+  expect((await evidence.json()).available).toBe(false);
+
+  const models = await request.get('/api/models/governance');
+  expect(models.ok()).toBeTruthy();
+  const modelJson = await models.json();
+  expect(modelJson.available).toBe(false);
+  expect(modelJson.capitalExecutionEnabled).toBe(false);
+
+  const killSwitches = await request.get('/api/risk/kill-switches');
+  expect(killSwitches.ok()).toBeTruthy();
+  const killJson = await killSwitches.json();
+  expect(killJson.capitalExecutionEnabled).toBe(false);
+  expect(killJson.criticalTrips).toBeGreaterThan(0);
+  expect(killJson.switches.some((item: { key: string; tripped: boolean }) => item.key === 'database' && item.tripped)).toBeTruthy();
+
+  const portfolio = await request.get('/api/portfolio/shadow');
+  expect(portfolio.ok()).toBeTruthy();
+  const portfolioJson = await portfolio.json();
+  expect(portfolioJson.available).toBe(false);
+  expect(portfolioJson.reason).toBe('database_not_configured');
+
+  const sources = await request.get('/api/research/source-reputation');
+  expect(sources.ok()).toBeTruthy();
+  expect((await sources.json()).available).toBe(false);
+
+  const twinsMissing = await request.get('/api/research/twins');
+  expect(twinsMissing.status()).toBe(400);
+  const twins = await request.get('/api/research/twins?opportunityId=shadow-test');
+  expect(twins.ok()).toBeTruthy();
+  expect((await twins.json()).available).toBe(false);
+});
+
+test('advanced write paths are protected', async ({ request }) => {
+  for (const path of ['/api/performance/evidence', '/api/research/source-reputation', '/api/portfolio/shadow']) {
+    const unauthorized = await request.post(path);
+    expect(unauthorized.status()).toBe(401);
+    const authorized = await request.post(path, { headers: { authorization: 'Bearer mercury-e2e-cron-secret' } });
+    expect(authorized.status()).toBe(503);
+  }
 });

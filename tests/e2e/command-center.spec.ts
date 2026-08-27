@@ -17,7 +17,7 @@ test('command center and autonomous organization load', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
   await expect(page.getByText('Capital execution', { exact: true })).toBeVisible();
-  await expect(page.getByText('LOCKED')).toBeVisible();
+  await expect(page.getByText('LOCKED', { exact: true })).toBeVisible();
   await expect(page.getByText('Machine Event Stream')).toBeVisible();
   await expect(page.getByText('Mercury Supervisor')).toBeVisible();
   await expect(page.getByText('Custodian', { exact: true })).toBeVisible();

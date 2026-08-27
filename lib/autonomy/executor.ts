@@ -1,6 +1,7 @@
 import type { IntelligenceJobDefinition } from '@/lib/workflows/jobs';
 import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers';
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
+import { runGemDiscoveryWorkflow } from '@/lib/workflows/gem-discovery';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
@@ -29,7 +30,7 @@ const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'social-radar': ['database'],
   'sec-filings': ['sec', 'database'],
   'market-regime': ['database'],
-  'gem-discovery': ['marketData', 'sec', 'otc', 'database'],
+  'gem-discovery': ['database'],
   'share-structure': ['database'],
   'finra-actions': [],
   'model-learning': ['database'],
@@ -37,34 +38,11 @@ const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
 
 function describe(job: IntelligenceJobDefinition, configured: ProviderKey[], missing: ProviderKey[]): Pick<AutonomousJobResult, 'status' | 'actionCount' | 'message'> {
   if (job.name === 'finra-actions') {
-    return {
-      status: 'degraded',
-      actionCount: 0,
-      message: 'Corporate-action ingestion is supported, but an official FINRA adapter is not configured yet.',
-    };
+    return { status: 'degraded', actionCount: 0, message: 'Corporate-action ingestion is supported, but an official FINRA adapter is not configured yet.' };
   }
-
-  if (configured.length === 0) {
-    return {
-      status: 'skipped',
-      actionCount: 0,
-      message: `Skipped safely because required providers are unavailable: ${missing.join(', ')}.`,
-    };
-  }
-
-  if (missing.length > 0) {
-    return {
-      status: 'degraded',
-      actionCount: configured.length,
-      message: `Ran readiness checks using ${configured.join(', ')}. Missing: ${missing.join(', ')}.`,
-    };
-  }
-
-  return {
-    status: 'completed',
-    actionCount: configured.length,
-    message: `Shadow workflow completed provider-readiness checks using ${configured.join(', ')}.`,
-  };
+  if (configured.length === 0) return { status: 'skipped', actionCount: 0, message: `Skipped safely because required providers are unavailable: ${missing.join(', ')}.` };
+  if (missing.length > 0) return { status: 'degraded', actionCount: configured.length, message: `Ran readiness checks using ${configured.join(', ')}. Missing: ${missing.join(', ')}.` };
+  return { status: 'completed', actionCount: configured.length, message: `Shadow workflow completed provider-readiness checks using ${configured.join(', ')}.` };
 }
 
 function failedJob(job: IntelligenceJobDefinition, startedAt: Date, requiredProviders: ProviderKey[], configuredProviders: ProviderKey[], missingProviders: ProviderKey[], label: string, error: unknown): AutonomousJobResult {
@@ -107,136 +85,57 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
 
   if (job.name === 'liquidity-pulse' && readiness.database.configured) {
     try {
-      const liquidity = await runLiquidityPulseWorkflow();
-      return {
-        name: job.name,
-        status: liquidity.snapshotsChecked > 0 ? 'completed' : 'degraded',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: liquidity.signals.length,
-        message: `Liquidity Pulse processed ${liquidity.snapshotsChecked} snapshots and ranked ${liquidity.signals.length} securities${liquidity.snapshotsChecked ? '' : '; no recent market snapshots found'}.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Liquidity Pulse', error);
-    }
+      const result = await runLiquidityPulseWorkflow();
+      return { name: job.name, status: result.snapshotsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.signals.length, message: `Liquidity Pulse processed ${result.snapshotsChecked} snapshots and ranked ${result.signals.length} securities${result.snapshotsChecked ? '' : '; no recent market snapshots found'}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Liquidity Pulse', error); }
   }
 
   if (job.name === 'market-regime' && readiness.database.configured) {
     try {
-      const regime = await runMarketRegimeWorkflow();
-      return {
-        name: job.name,
-        status: regime.snapshotsChecked > 0 ? 'completed' : 'degraded',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: regime.symbolsObserved,
-        message: `Market regime ${regime.regime} with outlook ${regime.outlookScore}, ${regime.symbolsObserved} symbols, median RVOL ${regime.medianRvol}, median spread ${regime.medianSpreadBps} bps.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Market Regime', error);
-    }
+      const result = await runMarketRegimeWorkflow();
+      return { name: job.name, status: result.snapshotsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.symbolsObserved, message: `Market regime ${result.regime} with outlook ${result.outlookScore}, ${result.symbolsObserved} symbols, median RVOL ${result.medianRvol}, median spread ${result.medianSpreadBps} bps.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Market Regime', error); }
   }
 
   if (job.name === 'share-structure' && readiness.database.configured) {
     try {
-      const structure = await runShareStructureWorkflow();
-      return {
-        name: job.name,
-        status: structure.observationsChecked > 0 ? 'completed' : 'degraded',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: structure.changes.filter((change) => change.riskScore >= 48).length,
-        message: `Share Structure compared ${structure.securitiesCompared} securities, found ${structure.changes.filter((change) => change.riskScore >= 48).length} material expansions, emitted ${structure.eventsCreated} new warnings.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Share Structure', error);
-    }
+      const result = await runShareStructureWorkflow();
+      const material = result.changes.filter((change) => change.riskScore >= 48).length;
+      return { name: job.name, status: result.observationsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: material, message: `Share Structure compared ${result.securitiesCompared} securities, found ${material} material expansions, emitted ${result.eventsCreated} new warnings.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Share Structure', error); }
   }
 
   if (job.name === 'risk-gateway' && readiness.database.configured) {
     try {
-      const risk = await runRiskGatewayWorkflow();
-      return {
-        name: job.name,
-        status: readiness.marketData.configured ? 'completed' : 'degraded',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: risk.flagged.length,
-        message: `Structural risk scan flagged ${risk.flagged.length} securities from ${risk.corporateActionsChecked} high-risk corporate actions and ${risk.dilutionEventsChecked} dilution events${readiness.marketData.configured ? '' : '; external market feed health unavailable'}.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Risk gateway', error);
-    }
+      const result = await runRiskGatewayWorkflow();
+      return { name: job.name, status: readiness.marketData.configured ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.flagged.length, message: `Structural risk scan flagged ${result.flagged.length} securities from ${result.corporateActionsChecked} high-risk corporate actions and ${result.dilutionEventsChecked} dilution events${readiness.marketData.configured ? '' : '; external market feed health unavailable'}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Risk gateway', error); }
   }
 
   if (job.name === 'social-radar' && readiness.database.configured) {
     try {
-      const social = await runSocialRadarWorkflow();
-      return {
-        name: job.name,
-        status: social.signalsChecked > 0 ? 'completed' : 'degraded',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: social.trends.length,
-        message: `Social Radar processed ${social.signalsChecked} authorized signals and ranked ${social.trends.length} ticker trends${social.signalsChecked ? '' : '; no recent authorized social data found'}.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Social Radar', error);
-    }
+      const result = await runSocialRadarWorkflow();
+      return { name: job.name, status: result.signalsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.trends.length, message: `Social Radar processed ${result.signalsChecked} authorized signals and ranked ${result.trends.length} ticker trends${result.signalsChecked ? '' : '; no recent authorized social data found'}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Social Radar', error); }
+  }
+
+  if (job.name === 'gem-discovery' && readiness.database.configured) {
+    try {
+      const result = await runGemDiscoveryWorkflow();
+      const strong = result.candidates.filter((candidate) => candidate.gemScore >= 75).length;
+      return { name: job.name, status: result.universeSize ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: strong, message: `Gem Discovery ranked ${result.candidates.length} candidates from ${result.universeSize} liquid symbols, with ${strong} scoring 75 or higher under market outlook ${result.marketOutlook}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Gem Discovery', error); }
   }
 
   if (missingProviders.length === 0 && job.name === 'sec-filings') {
     try {
-      const sec = await runSecFilingsWorkflow();
-      return {
-        name: job.name,
-        status: sec.errors.length ? 'degraded' : 'completed',
-        shadowOnly: true,
-        startedAt: startedAt.toISOString(),
-        completedAt: new Date().toISOString(),
-        requiredProviders,
-        configuredProviders,
-        missingProviders,
-        actionCount: sec.filingsInserted,
-        message: `SEC ingestion checked ${sec.companiesChecked} companies, observed ${sec.filingsObserved} material filings, inserted ${sec.filingsInserted}, emitted ${sec.signalsCreated} machine signals${sec.errors.length ? `, with ${sec.errors.length} errors` : ''}.`,
-      };
-    } catch (error) {
-      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'SEC ingestion', error);
-    }
+      const result = await runSecFilingsWorkflow();
+      return { name: job.name, status: result.errors.length ? 'degraded' : 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.filingsInserted, message: `SEC ingestion checked ${result.companiesChecked} companies, observed ${result.filingsObserved} material filings, inserted ${result.filingsInserted}, emitted ${result.signalsCreated} machine signals${result.errors.length ? `, with ${result.errors.length} errors` : ''}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'SEC ingestion', error); }
   }
 
   const outcome = describe(job, configuredProviders, missingProviders);
-
-  return {
-    name: job.name,
-    shadowOnly: true,
-    startedAt: startedAt.toISOString(),
-    completedAt: new Date().toISOString(),
-    requiredProviders,
-    configuredProviders,
-    missingProviders,
-    ...outcome,
-  };
+  return { name: job.name, shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, ...outcome };
 }
 
 export async function executeAutonomousJobs(jobs: IntelligenceJobDefinition[]) {

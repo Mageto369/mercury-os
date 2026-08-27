@@ -141,10 +141,14 @@ export const autonomousActions = pgTable("autonomous_actions", {
 
 export const systemEvents = pgTable("system_events", {
   id: text("id").primaryKey(),
+  securityId: text("security_id").references(() => securities.id),
   category: text("category").notNull(),
   severity: text("severity").notNull(),
   source: text("source").notNull(),
   message: text("message").notNull(),
   payload: jsonb("payload"),
   observedAt: timestamp("observed_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [index("system_event_category_time_idx").on(table.category, table.observedAt)]);
+}, (table) => [
+  index("system_event_category_time_idx").on(table.category, table.observedAt),
+  index("system_event_security_time_idx").on(table.securityId, table.observedAt),
+]);

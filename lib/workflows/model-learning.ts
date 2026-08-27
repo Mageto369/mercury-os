@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { decisionLogs, opportunities, securities, systemEvents } from '@/lib/db/schema';
@@ -64,7 +65,7 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
   if (driftDetected) {
     const eventKey = `model-learning:${new Date().toISOString().slice(0, 10)}`;
     await db.insert(systemEvents).values({
-      id: crypto.randomUUID(),
+      id: randomUUID(),
       eventKey,
       category: 'model:drift',
       severity: 'high',

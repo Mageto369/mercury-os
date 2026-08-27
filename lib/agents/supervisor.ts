@@ -100,7 +100,7 @@ export async function runSupervisor(date = new Date(), requestedJobs?: Intellige
     agentId: 'data-quality-agent',
     status: dataQuality.status === 'healthy' ? 'completed' : dataQuality.status === 'offline' ? 'skipped' : 'degraded',
     mission: 'freshness-preflight',
-    details: { staleDomains: dataQuality.staleDomains, checks: dataQuality.checks },
+    details: { staleDomains: dataQuality.staleDomains, detail: dataQuality.detail },
   });
 
   if (governance.status === 'degraded') escalations.push(`governance: ${governance.authorityViolations.join(', ')}`);

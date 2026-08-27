@@ -5,6 +5,7 @@ import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
 import { runSecFilingsWorkflow } from '@/lib/workflows/sec-filings';
+import { runShareStructureWorkflow } from '@/lib/workflows/share-structure';
 import { runSocialRadarWorkflow } from '@/lib/workflows/social-radar';
 
 export type AutonomousJobStatus = 'completed' | 'degraded' | 'skipped';
@@ -29,7 +30,7 @@ const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'sec-filings': ['sec', 'database'],
   'market-regime': ['database'],
   'gem-discovery': ['marketData', 'sec', 'otc', 'database'],
-  'share-structure': ['otc', 'database'],
+  'share-structure': ['database'],
   'finra-actions': [],
   'model-learning': ['database'],
 };
@@ -39,7 +40,7 @@ function describe(job: IntelligenceJobDefinition, configured: ProviderKey[], mis
     return {
       status: 'degraded',
       actionCount: 0,
-      message: 'FINRA adapter contract is reserved, but no authenticated provider is configured yet.',
+      message: 'Corporate-action ingestion is supported, but an official FINRA adapter is not configured yet.',
     };
   }
 
@@ -141,6 +142,26 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
       };
     } catch (error) {
       return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Market Regime', error);
+    }
+  }
+
+  if (job.name === 'share-structure' && readiness.database.configured) {
+    try {
+      const structure = await runShareStructureWorkflow();
+      return {
+        name: job.name,
+        status: structure.observationsChecked > 0 ? 'completed' : 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: structure.changes.filter((change) => change.riskScore >= 48).length,
+        message: `Share Structure compared ${structure.securitiesCompared} securities, found ${structure.changes.filter((change) => change.riskScore >= 48).length} material expansions, emitted ${structure.eventsCreated} new warnings.`,
+      };
+    } catch (error) {
+      return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Share Structure', error);
     }
   }
 

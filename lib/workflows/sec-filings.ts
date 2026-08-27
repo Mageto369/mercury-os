@@ -61,12 +61,12 @@ export async function runSecFilingsWorkflow(): Promise<SecWorkflowResult> {
           filingsInserted += 1;
           await db.insert(systemEvents).values({
             id: randomUUID(),
+            securityId: security.id,
             category: `filing:${classification.type}`,
             severity: classification.priority,
             source: 'sec-edgar',
             message: `${security.symbol} filed ${event.form}: ${classification.label}`,
             payload: {
-              securityId: security.id,
               symbol: security.symbol,
               accessionNumber: event.accessionNumber,
               form: event.form,

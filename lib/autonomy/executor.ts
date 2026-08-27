@@ -1,5 +1,6 @@
 import type { IntelligenceJobDefinition } from '@/lib/workflows/jobs';
 import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers';
+import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
 
 export type AutonomousJobStatus = 'completed' | 'degraded' | 'skipped';
 
@@ -63,9 +64,26 @@ function describe(job: IntelligenceJobDefinition, configured: ProviderKey[], mis
 export async function executeAutonomousJob(job: IntelligenceJobDefinition): Promise<AutonomousJobResult> {
   const startedAt = new Date();
   const readiness = getProviderReadiness();
+  const guardrails = evaluateAutonomyGuardrails();
   const requiredProviders = requirements[job.name];
   const configuredProviders = requiredProviders.filter((key) => readiness[key].configured);
   const missingProviders = requiredProviders.filter((key) => !readiness[key].configured);
+
+  if (!guardrails.researchExecutionAllowed) {
+    return {
+      name: job.name,
+      status: 'skipped',
+      shadowOnly: true,
+      startedAt: startedAt.toISOString(),
+      completedAt: new Date().toISOString(),
+      requiredProviders,
+      configuredProviders,
+      missingProviders,
+      actionCount: 0,
+      message: `Skipped by autonomy guardrail: ${guardrails.reasons.join(', ')}.`,
+    };
+  }
+
   const outcome = describe(job, configuredProviders, missingProviders);
 
   return {

@@ -33,6 +33,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: 'invalid_request' }, { status: 400 });
   }
 
-  const result = await runSupervisor(new Date(), parsed.data.jobs);
+  const result = await runSupervisor(new Date(), parsed.data.jobs, 'manual');
   return NextResponse.json({ ok: true, ...result });
 }

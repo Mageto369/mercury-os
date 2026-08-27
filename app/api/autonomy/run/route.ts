@@ -1,0 +1,38 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { executeAutonomousJob } from '@/lib/autonomy/executor';
+import { intelligenceJobs } from '@/lib/workflows/jobs';
+
+export const runtime = 'nodejs';
+
+const requestSchema = z.object({
+  job: z.string().min(1),
+});
+
+export async function POST(request: Request) {
+  const auth = request.headers.get('authorization');
+  const secret = process.env.CRON_SECRET;
+
+  if (secret && auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  }
+
+  const parsed = requestSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json({ ok: false, error: 'invalid_request' }, { status: 400 });
+  }
+
+  const job = intelligenceJobs.find((candidate) => candidate.name === parsed.data.job);
+  if (!job) {
+    return NextResponse.json({ ok: false, error: 'unknown_job' }, { status: 404 });
+  }
+
+  const result = await executeAutonomousJob(job);
+
+  return NextResponse.json({
+    ok: true,
+    mode: 'shadow',
+    capitalExecutionEnabled: false,
+    result,
+  });
+}

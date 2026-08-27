@@ -3,6 +3,7 @@ import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
 import { runSecFilingsWorkflow } from '@/lib/workflows/sec-filings';
+import { runSocialRadarWorkflow } from '@/lib/workflows/social-radar';
 
 export type AutonomousJobStatus = 'completed' | 'degraded' | 'skipped';
 
@@ -22,7 +23,7 @@ export interface AutonomousJobResult {
 const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'liquidity-pulse': ['marketData'],
   'risk-gateway': ['database', 'marketData'],
-  'social-radar': ['reddit', 'discord', 'telegram', 'facebook'],
+  'social-radar': ['database'],
   'sec-filings': ['sec', 'database'],
   'market-regime': ['marketData'],
   'gem-discovery': ['marketData', 'sec', 'otc', 'database'],
@@ -113,6 +114,37 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
         missingProviders,
         actionCount: 0,
         message: `Risk gateway failed safely: ${error instanceof Error ? error.message : 'unknown risk workflow error'}.`,
+      };
+    }
+  }
+
+  if (job.name === 'social-radar' && readiness.database.configured) {
+    try {
+      const social = await runSocialRadarWorkflow();
+      return {
+        name: job.name,
+        status: social.signalsChecked > 0 ? 'completed' : 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: social.trends.length,
+        message: `Social Radar processed ${social.signalsChecked} authorized signals and ranked ${social.trends.length} ticker trends${social.signalsChecked ? '' : '; no recent authorized social data found'}.`,
+      };
+    } catch (error) {
+      return {
+        name: job.name,
+        status: 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: 0,
+        message: `Social Radar failed safely: ${error instanceof Error ? error.message : 'unknown social workflow error'}.`,
       };
     }
   }

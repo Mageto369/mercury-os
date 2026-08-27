@@ -36,6 +36,7 @@ test('production readiness, performance, and promotion gates are visible and fai
   await expect(page.getByRole('heading', { name: 'Shadow Promotion Gate' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mercury Intelligence Lab' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Market Feed Fabric' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Historical Replay' })).toBeVisible();
 
   const response = await request.get('/api/activation/readiness');
   expect(response.ok()).toBeTruthy();
@@ -114,6 +115,26 @@ test('market provider fabric exposes failover state and protected pulling', asyn
 
   const authorized = await request.post('/api/providers/market/pull', {
     headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+  });
+  expect(authorized.status()).toBe(503);
+  const json = await authorized.json();
+  expect(json.ok).toBe(false);
+  expect(json.reason).toBe('database_not_configured');
+});
+
+test('historical replay is visible, protected, and fail-closed without persistence', async ({ request }) => {
+  const status = await request.get('/api/research/history');
+  expect(status.ok()).toBeTruthy();
+  const statusJson = await status.json();
+  expect(statusJson.available).toBe(false);
+  expect(statusJson.reason).toBe('database_not_configured');
+
+  const unauthorized = await request.post('/api/research/history');
+  expect(unauthorized.status()).toBe(401);
+
+  const authorized = await request.post('/api/research/history', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { provider: 'auto' },
   });
   expect(authorized.status()).toBe(503);
   const json = await authorized.json();

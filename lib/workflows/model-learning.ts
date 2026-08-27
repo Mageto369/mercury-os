@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { replayRuns } from '@/lib/db/ops-schema';
 import { decisionLogs, opportunities, securities, systemEvents } from '@/lib/db/schema';
 
 export interface LearningMetric {
@@ -9,6 +10,7 @@ export interface LearningMetric {
 }
 
 export interface ModelLearningResult {
+  replayRunId: string;
   opportunitiesReviewed: number;
   decisionsReviewed: number;
   metrics: LearningMetric[];
@@ -19,8 +21,19 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
   const db = getDb();
   if (!db) throw new Error('DATABASE_URL is not configured');
 
+  const replayRunId = randomUUID();
+  const startedAt = new Date();
   const lookbackDays = Math.max(1, Math.min(365, Number(process.env.LEARNING_LOOKBACK_DAYS ?? 30)));
+  const modelVersion = process.env.MODEL_VERSION ?? 'mercury-live-shadow-v1';
   const cutoff = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000);
+
+  await db.insert(replayRuns).values({
+    id: replayRunId,
+    modelVersion,
+    status: 'running',
+    lookbackDays,
+    startedAt,
+  });
 
   const opportunityRows = await db
     .select({
@@ -71,11 +84,21 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
       severity: 'high',
       source: 'replay-agent',
       message: `Replay detected model-quality drift across ${opportunityRows.length} shadow opportunities.`,
-      payload: { metrics, lookbackDays },
+      payload: { metrics, lookbackDays, replayRunId, modelVersion },
     }).onConflictDoNothing({ target: systemEvents.eventKey });
   }
 
+  await db.update(replayRuns).set({
+    status: 'completed',
+    opportunitiesReviewed: opportunityRows.length,
+    decisionsReviewed: decisionRows.length,
+    driftDetected,
+    metrics,
+    completedAt: new Date(),
+  }).where(eq(replayRuns.id, replayRunId));
+
   return {
+    replayRunId,
     opportunitiesReviewed: opportunityRows.length,
     decisionsReviewed: decisionRows.length,
     metrics,

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./mobile.css";
 
 export const metadata: Metadata = {
   title: "Mercury OS | Microcap Alpha Intelligence",

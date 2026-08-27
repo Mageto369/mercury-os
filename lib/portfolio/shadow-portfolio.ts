@@ -82,7 +82,7 @@ export async function buildShadowPortfolio() {
       concentration_score, regime, positions, limits, observed_at
     ) VALUES (
       ${id}, ${grossExposure}, ${grossExposure}, ${null}, ${0}, ${liquidityAtRisk}, ${concentration},
-      'research-shadow', ${sql.json(positions)}, ${sql.json(limits)}, now()
+      'research-shadow', ${sql.json(positions as any)}, ${sql.json(limits)}, now()
     )
   `;
 

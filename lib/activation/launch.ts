@@ -4,7 +4,9 @@ import { seedValidationUniverse } from '@/lib/db/seed-validation';
 import { runSupervisor } from '@/lib/agents/supervisor';
 import { getProductionReadiness } from '@/lib/activation/readiness';
 import { getShadowPerformance } from '@/lib/performance/shadow';
+import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 import { getLatestAgentHeartbeats } from '@/lib/agents/heartbeat';
+import { ensureBaselineModel } from '@/lib/models/governance';
 
 const activationJobs = [
   'market-regime',
@@ -47,6 +49,7 @@ export async function runShadowActivation() {
     };
   }
 
+  const modelBaseline = await ensureBaselineModel();
   const seed = await seedValidationUniverse();
   if (!seed.ok) {
     return {
@@ -54,6 +57,7 @@ export async function runShadowActivation() {
       phase: 'seed-validation' as const,
       bootstrap,
       intelligenceLab,
+      modelBaseline,
       seed,
       mode: 'shadow' as const,
       capitalExecutionEnabled: false as const,
@@ -63,6 +67,7 @@ export async function runShadowActivation() {
   }
 
   const supervisor = await runSupervisor(new Date(), [...activationJobs], 'manual');
+  const outcomeMaturation = await matureOpportunityOutcomes(500);
   const [readiness, performance, fleet] = await Promise.all([
     getProductionReadiness(),
     getShadowPerformance(),
@@ -78,7 +83,9 @@ export async function runShadowActivation() {
     capitalExecutionEnabled: false as const,
     bootstrap,
     intelligenceLab,
+    modelBaseline,
     seed,
+    outcomeMaturation,
     supervisor: {
       supervisor: supervisor.supervisor,
       dueJobs: supervisor.dueJobs,

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { runSupervisor } from '@/lib/agents/supervisor';
 import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 import { refreshSourceReputation } from '@/lib/research/source-reputation';
+import { buildShadowPortfolio } from '@/lib/portfolio/shadow-portfolio';
 
 export const runtime = 'nodejs';
 
@@ -16,6 +17,7 @@ export async function GET(request: Request) {
   const result = await runSupervisor(new Date());
   let outcomeMaturation: Awaited<ReturnType<typeof matureOpportunityOutcomes>> | { ok: false; reason: string };
   let sourceReputation: Awaited<ReturnType<typeof refreshSourceReputation>> | { ok: false; reason: string };
+  let shadowPortfolio: Awaited<ReturnType<typeof buildShadowPortfolio>> | { ok: false; reason: string };
   try {
     outcomeMaturation = await matureOpportunityOutcomes(250);
   } catch (error) {
@@ -25,6 +27,11 @@ export async function GET(request: Request) {
     sourceReputation = await refreshSourceReputation();
   } catch (error) {
     sourceReputation = { ok: false, reason: error instanceof Error ? error.message : 'source_reputation_failed' };
+  }
+  try {
+    shadowPortfolio = await buildShadowPortfolio();
+  } catch (error) {
+    shadowPortfolio = { ok: false, reason: error instanceof Error ? error.message : 'shadow_portfolio_failed' };
   }
 
   return NextResponse.json({
@@ -43,6 +50,7 @@ export async function GET(request: Request) {
     escalations: result.escalations,
     outcomeMaturation,
     sourceReputation,
+    shadowPortfolio,
     jobs: result.assignments,
   });
 }

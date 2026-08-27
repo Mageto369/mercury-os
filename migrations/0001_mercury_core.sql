@@ -139,6 +139,7 @@ CREATE INDEX IF NOT EXISTS autonomous_action_job_time_idx ON autonomous_actions(
 
 CREATE TABLE IF NOT EXISTS system_events (
   id text PRIMARY KEY,
+  security_id text REFERENCES securities(id),
   category text NOT NULL,
   severity text NOT NULL,
   source text NOT NULL,
@@ -146,4 +147,6 @@ CREATE TABLE IF NOT EXISTS system_events (
   payload jsonb,
   observed_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE system_events ADD COLUMN IF NOT EXISTS security_id text REFERENCES securities(id);
 CREATE INDEX IF NOT EXISTS system_event_category_time_idx ON system_events(category, observed_at);
+CREATE INDEX IF NOT EXISTS system_event_security_time_idx ON system_events(security_id, observed_at);

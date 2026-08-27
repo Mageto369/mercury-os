@@ -9,10 +9,11 @@ type LabState = {
   risk: Record<string, any> | null;
   portfolio: Record<string, any> | null;
   sources: Record<string, any> | null;
+  marketProviders: Record<string, any> | null;
 };
 
 export function IntelligenceLab() {
-  const [state, setState] = useState<LabState>({ signals: null, evidence: null, models: null, risk: null, portfolio: null, sources: null });
+  const [state, setState] = useState<LabState>({ signals: null, evidence: null, models: null, risk: null, portfolio: null, sources: null, marketProviders: null });
 
   useEffect(() => {
     Promise.all([
@@ -22,7 +23,8 @@ export function IntelligenceLab() {
       fetch('/api/risk/kill-switches', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/portfolio/shadow', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/research/source-reputation?limit=5', { cache: 'no-store' }).then((r) => r.json()),
-    ]).then(([signals, evidence, models, risk, portfolio, sources]) => setState({ signals, evidence, models, risk, portfolio, sources }))
+      fetch('/api/providers/market/status', { cache: 'no-store' }).then((r) => r.json()),
+    ]).then(([signals, evidence, models, risk, portfolio, sources, marketProviders]) => setState({ signals, evidence, models, risk, portfolio, sources, marketProviders }))
       .catch(() => undefined);
   }, []);
 
@@ -34,13 +36,16 @@ export function IntelligenceLab() {
   const criticalTrips = Number(state.risk?.criticalTrips ?? 0);
   const positions = Array.isArray(state.portfolio?.positions) ? state.portfolio.positions.length : 0;
   const sourceRows = Array.isArray(state.sources?.sources) ? state.sources.sources : [];
+  const providerRows = Array.isArray(state.marketProviders?.providers) ? state.marketProviders.providers : [];
+  const configuredProviders = providerRows.filter((provider: any) => provider.configured).length;
+  const providerPreference = Array.isArray(state.marketProviders?.preferred) ? state.marketProviders.preferred.join(' → ') : 'massive → intrinio';
 
   return <section className="workspace" aria-label="Mercury intelligence lab">
     <div className="section-head">
       <div>
         <div className="eyebrow">Institutional research laboratory</div>
         <h2>Mercury Intelligence Lab</h2>
-        <p>Signal provenance, realized evidence, model governance, source reputation, execution capacity, and independent survival controls.</p>
+        <p>Signal provenance, realized evidence, model governance, source reputation, execution capacity, provider failover, and independent survival controls.</p>
       </div>
       <span className="badge warn">SHADOW ONLY</span>
     </div>
@@ -54,8 +59,10 @@ export function IntelligenceLab() {
 
     <div className="triple-grid">
       <div className="surface mini-panel"><h3>Top Source Reputation</h3>{sourceRows.length ? sourceRows.map((source: any) => <div className="source-row" key={`${source.source_type}:${source.source_ref}`}><span>{source.source_ref}<small>{source.source_type}</small></span><b>{source.reliability_score}</b><em>{source.observations} obs</em></div>) : <p className="muted2">Source reputation will populate after outcome-linked social observations mature.</p>}</div>
+      <div className="surface mini-panel"><h3>Market Feed Fabric</h3><div className="rule-stack"><div><span>Configured adapters</span><b>{configuredProviders}/{providerRows.length || 2}</b></div><div><span>Mode</span><b>{String(state.marketProviders?.mode ?? 'auto').toUpperCase()}</b></div><div><span>Failover order</span><b>{providerPreference}</b></div></div></div>
       <div className="surface mini-panel"><h3>Shadow Portfolio</h3><div className="rule-stack"><div><span>Positions</span><b>{positions}</b></div><div><span>Gross exposure</span><b>{Number(state.portfolio?.gross_exposure ?? state.portfolio?.grossExposure ?? 0).toLocaleString()}</b></div><div><span>Execution mode</span><b className="warn">SIMULATED</b></div></div></div>
-      <div className="surface mini-panel"><h3>Evidence Ladder</h3><div className="rule-stack"><div><span>Research</span><b className="good">AUTONOMOUS</b></div><div><span>Paper review</span><b className="warn">GATED</b></div><div><span>Live capital</span><b className="warn">DISABLED</b></div></div></div>
     </div>
+
+    <div className="surface mini-panel"><h3>Evidence Ladder</h3><div className="rule-stack"><div><span>Research</span><b className="good">AUTONOMOUS</b></div><div><span>Paper review</span><b className="warn">GATED</b></div><div><span>Live capital</span><b className="warn">DISABLED</b></div></div></div>
   </section>;
 }

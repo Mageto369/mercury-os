@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { persistAutonomousResult } from '@/lib/autonomy/audit';
 import { executeAutonomousJob } from '@/lib/autonomy/executor';
 import { intelligenceJobs } from '@/lib/workflows/jobs';
 
@@ -28,11 +29,13 @@ export async function POST(request: Request) {
   }
 
   const result = await executeAutonomousJob(job);
+  const audit = await persistAutonomousResult(result, 'manual');
 
   return NextResponse.json({
     ok: true,
     mode: 'shadow',
     capitalExecutionEnabled: false,
     result,
+    audit,
   });
 }

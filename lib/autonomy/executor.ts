@@ -1,9 +1,11 @@
 import type { IntelligenceJobDefinition } from '@/lib/workflows/jobs';
 import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers';
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
+import { runCorporateActionsWorkflow } from '@/lib/workflows/corporate-actions';
 import { runGemDiscoveryWorkflow } from '@/lib/workflows/gem-discovery';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
+import { runModelLearningWorkflow } from '@/lib/workflows/model-learning';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
 import { runSecFilingsWorkflow } from '@/lib/workflows/sec-filings';
 import { runShareStructureWorkflow } from '@/lib/workflows/share-structure';
@@ -32,14 +34,11 @@ const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'market-regime': ['database'],
   'gem-discovery': ['database'],
   'share-structure': ['database'],
-  'finra-actions': [],
+  'finra-actions': ['database'],
   'model-learning': ['database'],
 };
 
 function describe(job: IntelligenceJobDefinition, configured: ProviderKey[], missing: ProviderKey[]): Pick<AutonomousJobResult, 'status' | 'actionCount' | 'message'> {
-  if (job.name === 'finra-actions') {
-    return { status: 'degraded', actionCount: 0, message: 'Corporate-action ingestion is supported, but an official FINRA adapter is not configured yet.' };
-  }
   if (configured.length === 0) return { status: 'skipped', actionCount: 0, message: `Skipped safely because required providers are unavailable: ${missing.join(', ')}.` };
   if (missing.length > 0) return { status: 'degraded', actionCount: configured.length, message: `Ran readiness checks using ${configured.join(', ')}. Missing: ${missing.join(', ')}.` };
   return { status: 'completed', actionCount: configured.length, message: `Shadow workflow completed provider-readiness checks using ${configured.join(', ')}.` };
@@ -105,6 +104,13 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Share Structure', error); }
   }
 
+  if (job.name === 'finra-actions' && readiness.database.configured) {
+    try {
+      const result = await runCorporateActionsWorkflow();
+      return { name: job.name, status: result.actionsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.highRisk.length, message: `Corporate Action agent reviewed ${result.actionsChecked} normalized actions and identified ${result.highRisk.length} high-risk events. External FINRA ingestion remains adapter-dependent.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Corporate Actions', error); }
+  }
+
   if (job.name === 'risk-gateway' && readiness.database.configured) {
     try {
       const result = await runRiskGatewayWorkflow();
@@ -125,6 +131,13 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
       const strong = result.candidates.filter((candidate) => candidate.gemScore >= 75).length;
       return { name: job.name, status: result.universeSize ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: strong, message: `Gem Discovery ranked ${result.candidates.length} candidates from ${result.universeSize} liquid symbols, with ${strong} scoring 75 or higher under market outlook ${result.marketOutlook}.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Gem Discovery', error); }
+  }
+
+  if (job.name === 'model-learning' && readiness.database.configured) {
+    try {
+      const result = await runModelLearningWorkflow();
+      return { name: job.name, status: result.opportunitiesReviewed ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.metrics.length, message: `Replay reviewed ${result.opportunitiesReviewed} opportunities and ${result.decisionsReviewed} decisions. Drift ${result.driftDetected ? 'detected and escalated' : 'not detected'}.` };
+    } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Model Learning', error); }
   }
 
   if (missingProviders.length === 0 && job.name === 'sec-filings') {

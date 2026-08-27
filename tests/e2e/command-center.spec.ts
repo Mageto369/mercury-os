@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test';
 
 const workspaces = [
-  'Market',
+  'Market Outlook',
   'Discovery',
   'Social Radar',
-  'Opportunity',
+  'Opportunities',
   'Portfolio',
   'Risk',
   'Research',

@@ -25,6 +25,8 @@ test('command center loads and key controls work', async ({ page }) => {
   await expect(page.getByText('Capital execution')).toBeVisible();
   await expect(page.getByText('LOCKED')).toBeVisible();
   await expect(page.getByText('0/9 configured')).toBeVisible();
+  await expect(page.getByText('Machine Event Stream')).toBeVisible();
+  await expect(page.getByText('warehouse offline')).toBeVisible();
 
   await page.getByRole('button', { name: 'Social Radar' }).click();
   await expect(page.getByText('Social Radar workspace')).toBeVisible();
@@ -80,6 +82,24 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(eventsJson.persistent).toBe(false);
   expect(eventsJson.reason).toBe('database_not_configured');
   expect(eventsJson.events).toEqual([]);
+
+  const socialTrends = await request.get('/api/social/trends');
+  expect(socialTrends.ok()).toBeTruthy();
+  const socialTrendsJson = await socialTrends.json();
+  expect(socialTrendsJson.persistent).toBe(false);
+  expect(socialTrendsJson.signalsChecked).toBe(0);
+  expect(socialTrendsJson.trends).toEqual([]);
+
+  const unauthorizedSocialIngest = await request.post('/api/ingest/social', {
+    data: { signals: [{ symbol: 'TEST', source: 'reddit', mentions: 2, velocity: 40, sentiment: 10, promotionRisk: 20, crowding: 15, observedAt: new Date().toISOString() }] },
+  });
+  expect(unauthorizedSocialIngest.status()).toBe(401);
+
+  const unavailableSocialIngest = await request.post('/api/ingest/social', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { signals: [{ symbol: 'TEST', source: 'reddit', mentions: 2, velocity: 40, sentiment: 10, promotionRisk: 20, crowding: 15, observedAt: new Date().toISOString() }] },
+  });
+  expect(unavailableSocialIngest.status()).toBe(503);
 
   const universe = await request.get('/api/universe');
   expect(universe.ok()).toBeTruthy();

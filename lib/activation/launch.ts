@@ -1,5 +1,6 @@
 import { bootstrapDatabase } from '@/lib/db/bootstrap';
 import { bootstrapIntelligenceLab } from '@/lib/db/bootstrap-intelligence-lab';
+import { bootstrapHistoricalReplay } from '@/lib/db/bootstrap-history';
 import { seedValidationUniverse } from '@/lib/db/seed-validation';
 import { runSupervisor } from '@/lib/agents/supervisor';
 import { getProductionReadiness } from '@/lib/activation/readiness';
@@ -49,6 +50,21 @@ export async function runShadowActivation() {
     };
   }
 
+  const historicalReplay = await bootstrapHistoricalReplay();
+  if (!historicalReplay.ok) {
+    return {
+      ok: false as const,
+      phase: 'historical-replay-bootstrap' as const,
+      bootstrap,
+      intelligenceLab,
+      historicalReplay,
+      mode: 'shadow' as const,
+      capitalExecutionEnabled: false as const,
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+    };
+  }
+
   const modelBaseline = await ensureBaselineModel();
   const seed = await seedValidationUniverse();
   if (!seed.ok) {
@@ -57,6 +73,7 @@ export async function runShadowActivation() {
       phase: 'seed-validation' as const,
       bootstrap,
       intelligenceLab,
+      historicalReplay,
       modelBaseline,
       seed,
       mode: 'shadow' as const,
@@ -83,6 +100,7 @@ export async function runShadowActivation() {
     capitalExecutionEnabled: false as const,
     bootstrap,
     intelligenceLab,
+    historicalReplay,
     modelBaseline,
     seed,
     outcomeMaturation,

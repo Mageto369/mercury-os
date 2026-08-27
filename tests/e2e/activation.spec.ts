@@ -29,10 +29,11 @@ test('agent heartbeat health reports persistent state truthfully', async ({ requ
   }
 });
 
-test('production readiness is visible and fail-closed without infrastructure', async ({ page, request }) => {
+test('production readiness, performance, and promotion gates are visible and fail-closed', async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Production Readiness' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shadow Performance' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Shadow Promotion Gate' })).toBeVisible();
 
   const response = await request.get('/api/activation/readiness');
   expect(response.ok()).toBeTruthy();
@@ -45,6 +46,15 @@ test('production readiness is visible and fail-closed without infrastructure', a
   expect(json.blockers).toContain('database');
   expect(json.blockers).toContain('market');
   expect(json.gates).toHaveLength(5);
+
+  const promotion = await request.get('/api/activation/promotion');
+  expect(promotion.ok()).toBeTruthy();
+  const promotionJson = await promotion.json();
+  expect(promotionJson.mode).toBe('shadow');
+  expect(promotionJson.capitalExecutionEnabled).toBe(false);
+  expect(promotionJson.qualifiedForPaperReview).toBe(false);
+  expect(promotionJson.totalRules).toBe(5);
+  expect(promotionJson.passedRules).toBeLessThan(5);
 });
 
 test('validation universe seeding is protected and requires Postgres', async ({ request }) => {
@@ -58,6 +68,21 @@ test('validation universe seeding is protected and requires Postgres', async ({ 
   const json = await authorized.json();
   expect(json.ok).toBe(false);
   expect(json.reason).toBe('database_not_configured');
+});
+
+test('one-shot shadow activation is protected and fails closed before database activation', async ({ request }) => {
+  const unauthorized = await request.post('/api/activation/launch');
+  expect(unauthorized.status()).toBe(401);
+
+  const authorized = await request.post('/api/activation/launch', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+  });
+  expect(authorized.status()).toBe(503);
+  const json = await authorized.json();
+  expect(json.ok).toBe(false);
+  expect(json.phase).toBe('bootstrap');
+  expect(json.mode).toBe('shadow');
+  expect(json.capitalExecutionEnabled).toBe(false);
 });
 
 test('shadow performance remains explicit when persistence is unavailable', async ({ request }) => {

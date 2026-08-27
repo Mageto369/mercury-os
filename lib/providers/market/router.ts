@@ -69,13 +69,14 @@ export async function pullAndPersistMarketData() {
     if (!securityId) continue;
     const floatShares = floats.get(securityId) ?? 0;
     const floatRotation = floatShares > 0 ? snapshot.volume / floatShares : null;
+    const payload = JSON.parse(JSON.stringify({ source: snapshot.source, provider: snapshot.providerPayload ?? {}, livePull: true })) as Record<string, string | number | boolean | null | Record<string, string | number | boolean | null>>;
     await sql`
       INSERT INTO market_snapshots (
         id, security_id, price, volume, dollar_volume, bid, ask, spread_bps, rvol, float_rotation, payload, observed_at
       ) VALUES (
         ${randomUUID()}, ${securityId}, ${snapshot.price}, ${Math.round(snapshot.volume)}, ${snapshot.dollarVolume},
         ${snapshot.bid ?? null}, ${snapshot.ask ?? null}, ${snapshot.spreadBps ?? null}, ${snapshot.rvol ?? null},
-        ${floatRotation}, ${sql.json({ source: snapshot.source, provider: snapshot.providerPayload ?? {}, livePull: true })}, ${snapshot.observedAt}
+        ${floatRotation}, ${sql.json(payload)}, ${snapshot.observedAt}
       )
     `;
     inserted += 1;

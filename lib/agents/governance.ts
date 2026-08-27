@@ -13,10 +13,8 @@ export function runGovernanceAgent(): GovernanceResult {
   const authorityViolations: string[] = [];
 
   for (const agent of agentRegistry) {
-    const authority = agent.authority.map((value) => value.toLowerCase());
-    if (authority.includes('trade' as never) || authority.includes('broker' as never)) {
-      authorityViolations.push(`${agent.id}: prohibited authority`);
-    }
+    const forbidden = agent.authority.some((value) => ['trade', 'broker'].includes(String(value).toLowerCase()));
+    if (forbidden) authorityViolations.push(`${agent.id}: prohibited authority`);
     if (!agent.hardLimits.length) authorityViolations.push(`${agent.id}: missing hard limits`);
   }
 

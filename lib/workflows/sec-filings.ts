@@ -59,8 +59,9 @@ export async function runSecFilingsWorkflow(): Promise<SecWorkflowResult> {
 
         if (result.length) {
           filingsInserted += 1;
-          await db.insert(systemEvents).values({
+          const eventResult = await db.insert(systemEvents).values({
             id: randomUUID(),
+            eventKey: `sec:${event.accessionNumber}`,
             securityId: security.id,
             category: `filing:${classification.type}`,
             severity: classification.priority,
@@ -75,8 +76,8 @@ export async function runSecFilingsWorkflow(): Promise<SecWorkflowResult> {
               riskDelta: classification.riskDelta,
               catalystDelta: classification.catalystDelta,
             },
-          });
-          signalsCreated += 1;
+          }).onConflictDoNothing({ target: systemEvents.eventKey }).returning({ id: systemEvents.id });
+          signalsCreated += eventResult.length;
         }
       }
     } catch (error) {

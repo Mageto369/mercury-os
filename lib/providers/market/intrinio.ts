@@ -6,7 +6,7 @@ type IntrinioRealtimeResponse = {
   last_time?: string;
   bid_price?: number;
   ask_price?: number;
-  volume?: number;
+  exchange_volume?: number;
 };
 
 function spreadBps(bid?: number, ask?: number) {
@@ -43,7 +43,7 @@ export const intrinioMarketProvider: MarketProvider = {
           const data = await response.json() as IntrinioRealtimeResponse;
           const price = Number(data.last_price ?? 0);
           if (!Number.isFinite(price) || price <= 0) throw new Error('snapshot_unusable');
-          const volume = Number(data.volume ?? 0);
+          const volume = Number(data.exchange_volume ?? 0);
           const bid = data.bid_price;
           const ask = data.ask_price;
           return {

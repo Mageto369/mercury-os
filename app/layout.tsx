@@ -3,6 +3,7 @@ import "./globals.css";
 import "./mobile.css";
 import "./autonomy.css";
 import "./live-warehouse.css";
+import "./agents.css";
 
 export const metadata: Metadata = {
   title: "Mercury OS | Microcap Alpha Intelligence",

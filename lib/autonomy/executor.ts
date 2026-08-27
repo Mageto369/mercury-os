@@ -1,6 +1,7 @@
 import type { IntelligenceJobDefinition } from '@/lib/workflows/jobs';
 import { getProviderReadiness, type ProviderKey } from '@/lib/autonomy/providers';
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
+import { runSecFilingsWorkflow } from '@/lib/workflows/sec-filings';
 
 export type AutonomousJobStatus = 'completed' | 'degraded' | 'skipped';
 
@@ -21,10 +22,10 @@ const requirements: Record<IntelligenceJobDefinition['name'], ProviderKey[]> = {
   'liquidity-pulse': ['marketData'],
   'risk-gateway': ['marketData'],
   'social-radar': ['reddit', 'discord', 'telegram', 'facebook'],
-  'sec-filings': ['sec'],
+  'sec-filings': ['sec', 'database'],
   'market-regime': ['marketData'],
-  'gem-discovery': ['marketData', 'sec', 'otc'],
-  'share-structure': ['otc'],
+  'gem-discovery': ['marketData', 'sec', 'otc', 'database'],
+  'share-structure': ['otc', 'database'],
   'finra-actions': [],
   'model-learning': ['database'],
 };
@@ -50,14 +51,14 @@ function describe(job: IntelligenceJobDefinition, configured: ProviderKey[], mis
     return {
       status: 'degraded',
       actionCount: configured.length,
-      message: `Ran in partial shadow mode using ${configured.join(', ')}. Missing: ${missing.join(', ')}.`,
+      message: `Ran readiness checks using ${configured.join(', ')}. Missing: ${missing.join(', ')}.`,
     };
   }
 
   return {
     status: 'completed',
     actionCount: configured.length,
-    message: `Shadow workflow completed provider-readiness and dispatch checks using ${configured.join(', ')}.`,
+    message: `Shadow workflow completed provider-readiness checks using ${configured.join(', ')}.`,
   };
 }
 
@@ -82,6 +83,37 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
       actionCount: 0,
       message: `Skipped by autonomy guardrail: ${guardrails.reasons.join(', ')}.`,
     };
+  }
+
+  if (missingProviders.length === 0 && job.name === 'sec-filings') {
+    try {
+      const sec = await runSecFilingsWorkflow();
+      return {
+        name: job.name,
+        status: sec.errors.length ? 'degraded' : 'completed',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: sec.filingsInserted,
+        message: `SEC ingestion checked ${sec.companiesChecked} companies, observed ${sec.filingsObserved} material filings, inserted ${sec.filingsInserted}${sec.errors.length ? `, with ${sec.errors.length} errors` : ''}.`,
+      };
+    } catch (error) {
+      return {
+        name: job.name,
+        status: 'degraded',
+        shadowOnly: true,
+        startedAt: startedAt.toISOString(),
+        completedAt: new Date().toISOString(),
+        requiredProviders,
+        configuredProviders,
+        missingProviders,
+        actionCount: 0,
+        message: `SEC ingestion failed safely: ${error instanceof Error ? error.message : 'unknown SEC workflow error'}.`,
+      };
+    }
   }
 
   const outcome = describe(job, configuredProviders, missingProviders);

@@ -1,74 +1,145 @@
 # Mercury OS Autonomous Agent System
 
-Mercury OS uses a supervised multi-agent research architecture. Every agent has a bounded mandate, explicit inputs and outputs, an escalation path, and hard authority limits. Capital execution is outside the authority of every agent.
+Mercury OS is a supervised, shadow-only multi-agent market research system. Every agent has a bounded mandate, explicit dependencies, auditable outputs, and hard authority limits. No agent has broker, order-routing, or live capital authority.
 
 ## Command structure
 
-Mercury Supervisor is the chief coordinator. It reads the schedule, provider readiness, system guardrails, due jobs, and prior worker outcomes. It assigns work in dependency-aware phases, records outcomes, escalates degraded critical jobs, and invokes the Opportunity Director after Gem Discovery when the warehouse is available.
+Mercury Supervisor coordinates the research fleet. Before assigning work it invokes two independent controls:
 
-## Agents
+- Custodian validates freshness and data quality across market, social, share-structure, and regulatory domains.
+- Arbiter verifies agent authority, hard limits, autonomy guardrails, and the capital-execution lock.
 
-### Mercury Supervisor
-Coordinates the whole autonomous research fleet. Owns assignment, escalation, system-state reporting, and audit orchestration. It cannot trade, allocate capital, override risk blocks, or invent missing feed data.
+Supervisor then assigns dependency-ordered missions, records heartbeats, persists workflow audits, escalates degraded critical jobs, invokes Vector after discovery when market data is fresh enough, and routes operational alerts when escalation is required.
 
-### Atlas, Market Regime Agent
-Owns market-regime. Measures the market posture from persisted market observations and produces regime, outlook, liquidity context, and aggression ceilings.
+## The 12-agent fleet
 
-### Pulse, Liquidity Agent
-Owns liquidity-pulse. Scores recent market snapshots for tradability, dollar volume, spread quality, RVOL, float rotation, and deterioration.
+### 1. Mercury Supervisor
+Chief autonomous research coordinator. Owns assignment, escalation, system-state reporting, and audit orchestration. Cannot trade, allocate capital, override risk, or fabricate provider data.
 
-### Prospector, Gem Scout Agent
-Owns gem-discovery. Combines liquidity, catalysts, share structure, social attention, market regime, and risk flags to identify asymmetric candidates.
+### 2. Custodian, Data Quality Agent
+Measures freshness and availability before any signal is treated as current. Stale or absent observations remain explicitly stale or absent.
 
-### Echo, Social Wave Agent
-Owns social-radar. Aggregates authorized social signals from permitted Reddit, Discord, Telegram, and Facebook collectors. Measures attention velocity, source count, crowding, promotion risk, and confirmation. It never posts, promotes, coordinates trades, or performs unauthorized scraping.
+### 3. Arbiter, Governance Agent
+Verifies authority boundaries and hard limits. It cannot weaken guardrails or grant trading/broker authority.
 
-### Edgar, Regulatory Agent
-Owns sec-filings. Ingests SEC submission data for tracked CIKs, stores filings idempotently, and emits structured catalyst, dilution, governance, and insider signals.
+### 4. Atlas, Market Regime Agent
+Measures speculative posture, breadth proxies, liquidity distribution, volatility, and market regime. Produces regime and aggression ceilings, never security approval.
 
-### CapTable, Structure Agent
-Owns share-structure and finra-actions. Tracks share-count expansion and normalized corporate actions, including reverse-split risk. Official external FINRA ingestion remains an adapter boundary, while normalized corporate-action analysis is operational now.
+### 5. Pulse, Liquidity Agent
+Measures dollar volume, spread quality, RVOL, float rotation, liquidity deterioration, and tradability.
 
-### Sentinel, Risk Agent
-Owns risk-gateway. Independently applies structural, dilution, liquidity, manipulation, and peak-risk gates. A Sentinel hard block is binding for all alpha agents.
+### 6. Prospector, Gem Scout Agent
+Finds asymmetric candidates from observed liquidity, catalysts, structure, attention, regime, and risk state.
 
-### Vector, Opportunity Director
-Runs after discovery when the research warehouse is ready. Converts validated candidates into persistent shadow opportunities and decision logs. Vector has no broker credentials and no order-submission authority.
+### 7. Echo, Social Wave Agent
+Aggregates authorized Reddit, Discord, Telegram, and Facebook signals. Measures propagation, velocity, crowding, promotion risk, and source leadership. It never posts, promotes, coordinates trades, or performs unauthorized scraping.
 
-### Replay, Learning Agent
-Owns model-learning. Reviews historical shadow opportunities and decisions, measures blocked rate and confidence-risk conflicts, detects drift, and emits a model-drift event for human review. Replay cannot promote a model to production.
+### 8. Edgar, Regulatory Agent
+Ingests public SEC submissions for tracked CIKs and converts filing metadata into catalyst, dilution, governance, and insider events.
+
+### 9. CapTable, Structure Agent
+Tracks share counts, float, authorized overhang, splits, and normalized corporate actions. Missing or unverified structure stays explicitly unverified.
+
+### 10. Sentinel, Risk Agent
+Independent structural, dilution, liquidity, promotion, and peak-risk gatekeeper. Hard blocks are binding for alpha agents.
+
+### 11. Vector, Opportunity Director
+Converts validated candidates into persistent shadow opportunities and decision logs. It recommends research states such as WATCH, GEM_WATCH, WAVE_ACTIVE, PRESS, REDUCE, EXIT, or BLOCK. It has no broker credentials or order-submission authority.
+
+### 12. Replay, Learning Agent
+Reviews opportunities, decisions, outcomes, workflow history, and drift evidence. It can propose model changes, but cannot self-promote a model or rewrite history.
 
 ## Supervisor phase order
 
-1. Pulse, liquidity-pulse
-2. Echo, social-radar
-3. Edgar, sec-filings
-4. CapTable, share-structure
-5. CapTable, corporate-action analysis
-6. Sentinel, risk-gateway
-7. Atlas, market-regime
-8. Prospector, gem-discovery
-9. Vector, opportunity generation when discovery ran and Postgres is ready
-10. Replay, model-learning on its daily schedule
+1. Custodian freshness preflight
+2. Arbiter governance preflight
+3. Pulse, liquidity-pulse
+4. Echo, social-radar
+5. Edgar, sec-filings
+6. CapTable, share-structure
+7. CapTable, corporate-action analysis
+8. Sentinel, risk-gateway
+9. Atlas, market-regime
+10. Prospector, gem-discovery
+11. Vector, opportunity generation when discovery ran, Postgres is configured, and market freshness passes
+12. Replay, model-learning on its scheduled cadence
 
-## Automation cadence
+## Autonomous post-processing loop
 
-Liquidity and risk run each minute. Social Radar runs every two minutes. SEC filings and market regime run every five minutes. Gem Discovery and share structure run every fifteen minutes. Corporate actions run every thirty minutes. Replay runs daily.
+After Supervisor completes, the intelligence cron performs research-only post-processing:
+
+1. Mature opportunity outcomes at 15 minutes, 60 minutes, and one day.
+2. Calculate MFE/MAE excursion evidence.
+3. Refresh social-source reputation against matured outcomes.
+4. Rebuild the liquidity-aware shadow portfolio through the conservative execution simulator.
+5. Persist the resulting evidence for replay, model governance, and promotion gates.
+
+No step submits an order.
+
+## Intelligence Lab
+
+Mercury's institutional research layer includes:
+
+- Alpha Signal Catalog: versionable signal definitions across catalyst, liquidity, microstructure, attention, structure, dilution, insider, regime, sympathy, volatility, quality, and distribution families.
+- Opportunity Outcomes: forward returns plus MFE/MAE evidence.
+- Historical Twins: nearest historical situations based on opportunity feature geometry and state.
+- Source Reputation: outcome-linked reliability, lead/late behavior, promotion rate, and positive 60-minute rate.
+- Model Registry: champion/challenger model identity, feature manifest, validation evidence, experiment history, promotion evidence, and retirement state.
+- Execution Simulator: conservative spread, participation, impact, fill probability, capacity, and discontinuity-risk estimates.
+- Shadow Portfolio Brain: liquidity-capped simulated exposure subject to gross and per-position limits.
+- Independent Kill-Switch Network: emergency halt, governance violations, persistent-store failure, stale market data, fleet failures, unresolved critical incidents, and shadow drawdown governor.
+
+## Evidence ladder
+
+DISCOVERED -> OBSERVED -> CONFIRMED -> QUALIFIED -> SHADOW -> PROVEN -> PAPER REVIEW ELIGIBLE
+
+Paper-review eligibility does not enable trading. Live capital remains outside the system's current authority.
+
+## Scheduling
+
+- Liquidity and risk: every minute
+- Social radar: every two minutes
+- SEC filings and market regime: every five minutes
+- Gem discovery and share structure: every fifteen minutes
+- Corporate actions: every thirty minutes
+- Replay/model learning: daily
+- Outcome maturation, source reputation, and shadow portfolio refresh: after each intelligence cron invocation
 
 ## Safety and failure behavior
 
-AUTONOMY_HALT=true stops research execution. Missing providers produce skipped or degraded outcomes. No agent fabricates live state. Cron and manual missions require the configured secret. Every ordinary specialist result is eligible for workflow and autonomous-action persistence when Postgres is available. All capital execution remains disabled.
+- AUTONOMY_HALT=true stops research execution.
+- Missing providers produce skipped or degraded results instead of fabricated state.
+- Custodian can prevent stale market data from reaching Vector.
+- Arbiter prevents authority expansion.
+- Sentinel blocks cannot be overridden by alpha agents.
+- Kill switches remain independent from opportunity scoring.
+- Broker authority remains NONE.
+- Capital execution remains false and locked throughout all current APIs and workflows.
 
-## APIs
+## Principal APIs
 
-GET /api/agents returns the full agent registry and guardrail state.
+- GET /api/agents
+- GET /api/agents/health
+- POST /api/agents/run
+- GET /api/cron/intelligence
+- GET /api/autonomy/status
+- GET /api/activation/readiness
+- POST /api/activation/launch
+- GET /api/activation/promotion
+- GET/POST /api/performance/evidence
+- GET /api/research/signals
+- GET /api/research/twins?opportunityId=...
+- GET/POST /api/research/source-reputation
+- GET /api/models/governance
+- GET /api/risk/kill-switches
+- GET/POST /api/portfolio/shadow
 
-POST /api/agents/run accepts a protected list of scheduled job names and asks Mercury Supervisor to assign those missions manually.
+## Supabase deployment requirement
 
-GET /api/cron/intelligence invokes Mercury Supervisor for jobs due at the current minute.
+Mercury now uses a generic Postgres runtime compatible with Supabase. Configure DATABASE_URL using a server-side Supabase pooled Postgres connection string. Apply both migrations under supabase/migrations or invoke the protected bootstrap endpoint after DATABASE_URL is configured.
 
-GET /api/autonomy/status exposes provider readiness and autonomy safety state.
+The activation sequence is:
 
-## Deployment requirement
+Supabase/Postgres -> full warehouse bootstrap -> model baseline -> validation seed -> Supervisor fleet -> opportunity persistence -> outcome maturation -> source reputation -> shadow portfolio -> readiness -> promotion evidence.
 
-The complete agent system becomes data-operational after DATABASE_URL is configured and the core migration is applied. Live feed collectors then send normalized market, social, share-structure, and corporate-action observations through the protected ingestion endpoints. SEC ingestion runs directly from public EDGAR once SEC_USER_AGENT and tracked CIKs are configured.
+Only authorized live feed adapters and credentials remain external to the repository.

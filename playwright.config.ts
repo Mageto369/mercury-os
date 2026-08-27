@@ -15,6 +15,10 @@ export default defineConfig({
     url: 'http://127.0.0.1:3000',
     timeout: 60_000,
     reuseExistingServer: false,
+    env: {
+      ...process.env,
+      CRON_SECRET: 'mercury-e2e-cron-secret',
+    },
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

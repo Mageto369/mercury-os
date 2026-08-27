@@ -1,4 +1,5 @@
 import { bootstrapDatabase } from '@/lib/db/bootstrap';
+import { bootstrapIntelligenceLab } from '@/lib/db/bootstrap-intelligence-lab';
 import { seedValidationUniverse } from '@/lib/db/seed-validation';
 import { runSupervisor } from '@/lib/agents/supervisor';
 import { getProductionReadiness } from '@/lib/activation/readiness';
@@ -32,12 +33,27 @@ export async function runShadowActivation() {
     };
   }
 
+  const intelligenceLab = await bootstrapIntelligenceLab();
+  if (!intelligenceLab.ok) {
+    return {
+      ok: false as const,
+      phase: 'intelligence-lab-bootstrap' as const,
+      bootstrap,
+      intelligenceLab,
+      mode: 'shadow' as const,
+      capitalExecutionEnabled: false as const,
+      startedAt: startedAt.toISOString(),
+      finishedAt: new Date().toISOString(),
+    };
+  }
+
   const seed = await seedValidationUniverse();
   if (!seed.ok) {
     return {
       ok: false as const,
       phase: 'seed-validation' as const,
       bootstrap,
+      intelligenceLab,
       seed,
       mode: 'shadow' as const,
       capitalExecutionEnabled: false as const,
@@ -61,6 +77,7 @@ export async function runShadowActivation() {
     mode: 'shadow' as const,
     capitalExecutionEnabled: false as const,
     bootstrap,
+    intelligenceLab,
     seed,
     supervisor: {
       supervisor: supervisor.supervisor,

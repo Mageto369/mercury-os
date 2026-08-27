@@ -32,6 +32,7 @@ test('agent heartbeat health reports persistent state truthfully', async ({ requ
 test('production readiness is visible and fail-closed without infrastructure', async ({ page, request }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Production Readiness' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Shadow Performance' })).toBeVisible();
 
   const response = await request.get('/api/activation/readiness');
   expect(response.ok()).toBeTruthy();
@@ -57,4 +58,16 @@ test('validation universe seeding is protected and requires Postgres', async ({ 
   const json = await authorized.json();
   expect(json.ok).toBe(false);
   expect(json.reason).toBe('database_not_configured');
+});
+
+test('shadow performance remains explicit when persistence is unavailable', async ({ request }) => {
+  const response = await request.get('/api/performance/shadow');
+  expect(response.ok()).toBeTruthy();
+  const json = await response.json();
+  expect(json.available).toBe(false);
+  expect(json.reason).toBe('database_not_configured');
+  expect(json.mode).toBe('shadow');
+  expect(json.capitalExecutionEnabled).toBe(false);
+  expect(json.horizons.m15.count).toBe(0);
+  expect(json.horizons.m60.count).toBe(0);
 });

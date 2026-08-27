@@ -21,6 +21,10 @@ test('command center loads and key controls work', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
   await expect(page.getByText('Maximum Market Outlook')).toBeVisible();
   await expect(page.getByText('Opportunity Command')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
+  await expect(page.getByText('Capital execution')).toBeVisible();
+  await expect(page.getByText('LOCKED')).toBeVisible();
+  await expect(page.getByText('0/9 configured')).toBeVisible();
 
   await page.getByRole('button', { name: 'Social Radar' }).click();
   await expect(page.getByText('Social Radar workspace')).toBeVisible();
@@ -63,9 +67,36 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(autonomyJson.mode).toBe('shadow');
   expect(autonomyJson.capitalExecutionEnabled).toBe(false);
   expect(autonomyJson.autonomousResearchEnabled).toBe(true);
+  expect(autonomyJson.requiredInfrastructureReady).toBe(false);
+  expect(autonomyJson.guardrails.coreInfrastructureReady).toBe(false);
+  expect(autonomyJson.guardrails.capitalExecutionEnabled).toBe(false);
   expect(autonomyJson.totalProviders).toBe(9);
   expect(Array.isArray(autonomyJson.jobs)).toBeTruthy();
   expect(autonomyJson.jobs.length).toBe(9);
+
+  const events = await request.get('/api/events/recent');
+  expect(events.ok()).toBeTruthy();
+  const eventsJson = await events.json();
+  expect(eventsJson.persistent).toBe(false);
+  expect(eventsJson.reason).toBe('database_not_configured');
+  expect(eventsJson.events).toEqual([]);
+
+  const universe = await request.get('/api/universe');
+  expect(universe.ok()).toBeTruthy();
+  const universeJson = await universe.json();
+  expect(universeJson.persistent).toBe(false);
+  expect(universeJson.securities).toEqual([]);
+
+  const unauthorizedUniverseWrite = await request.post('/api/universe', {
+    data: { symbol: 'TEST', market: 'OTC', cik: '12345' },
+  });
+  expect(unauthorizedUniverseWrite.status()).toBe(401);
+
+  const unavailableUniverseWrite = await request.post('/api/universe', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { symbol: 'TEST', market: 'OTC', cik: '12345' },
+  });
+  expect(unavailableUniverseWrite.status()).toBe(503);
 
   const pulse = await request.post('/api/control/pulse');
   expect(pulse.ok()).toBeTruthy();
@@ -85,6 +116,7 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(cronJson.autonomousExecution).toBe(false);
   expect(Array.isArray(cronJson.jobs)).toBeTruthy();
   expect(cronJson.completed + cronJson.degraded + cronJson.skipped).toBe(cronJson.dueJobs);
+  expect(cronJson.persistedAudits).toBe(0);
   for (const job of cronJson.jobs) {
     expect(allowedJobStatuses.has(job.status)).toBeTruthy();
     expect(job.shadowOnly).toBe(true);
@@ -106,6 +138,8 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(manualRunJson.result.name).toBe('market-regime');
   expect(manualRunJson.result.status).toBe('skipped');
   expect(manualRunJson.result.missingProviders).toContain('marketData');
+  expect(manualRunJson.audit.persisted).toBe(false);
+  expect(manualRunJson.audit.reason).toBe('database_not_configured');
 
   const unknownRun = await request.post('/api/autonomy/run', {
     headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
@@ -139,6 +173,7 @@ test('mobile layout remains usable', async ({ page, isMobile }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
 
   for (const workspace of ['Risk', 'Social Radar', 'Workflows']) {
     await page.getByRole('button', { name: workspace, exact: true }).click();

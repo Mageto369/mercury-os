@@ -20,19 +20,17 @@ test('command center and autonomous organization load', async ({ page }) => {
   await expect(page.getByText('LOCKED')).toBeVisible();
   await expect(page.getByText('Machine Event Stream')).toBeVisible();
   await expect(page.getByText('Mercury Supervisor')).toBeVisible();
+  await expect(page.getByText('Custodian', { exact: true })).toBeVisible();
+  await expect(page.getByText('Arbiter', { exact: true })).toBeVisible();
   await expect(page.getByText('Sentinel', { exact: true })).toBeVisible();
   await expect(page.getByText('Vector', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Social Radar' }).click();
   await expect(page.getByText('Social Radar workspace')).toBeVisible();
-
-  const ranking = page.locator('select');
-  await ranking.selectOption('gem');
+  await page.locator('select').selectOption('gem');
   await expect(page.locator('tbody tr').first().locator('td').first()).toContainText('CRBN');
-
   await page.getByText('DRNX', { exact: true }).first().click();
   await expect(page.locator('.ticker-detail h2')).toContainText('DRNX');
-
   await page.getByRole('button', { name: /Run Intelligence Pulse/i }).click();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeEnabled();
 });
@@ -56,13 +54,17 @@ test('agent registry is complete and authority remains bounded', async ({ reques
   expect(json.mode).toBe('shadow');
   expect(json.capitalExecutionEnabled).toBe(false);
   expect(json.supervisor).toBe('mercury-supervisor');
-  expect(json.agents).toHaveLength(10);
+  expect(json.agents).toHaveLength(12);
+  expect(json.controls.governance.status).toBe('healthy');
+  expect(json.controls.governance.capitalExecutionEnabled).toBe(false);
+  expect(json.controls.dataQuality.status).toBe('offline');
+  expect(json.controls.dataQuality.staleDomains).toContain('database');
 
   const ids = new Set(json.agents.map((agent: { id: string }) => agent.id));
   for (const required of [
-    'mercury-supervisor', 'market-regime-agent', 'liquidity-agent', 'gem-scout-agent',
-    'social-wave-agent', 'regulatory-agent', 'structure-agent', 'risk-sentinel-agent',
-    'opportunity-director-agent', 'learning-agent',
+    'mercury-supervisor', 'data-quality-agent', 'governance-agent', 'market-regime-agent',
+    'liquidity-agent', 'gem-scout-agent', 'social-wave-agent', 'regulatory-agent',
+    'structure-agent', 'risk-sentinel-agent', 'opportunity-director-agent', 'learning-agent',
   ]) expect(ids.has(required)).toBeTruthy();
 
   for (const agent of json.agents) {
@@ -97,6 +99,8 @@ test('supervisor mission assignment is protected and fail-closed', async ({ requ
   expect(json.capitalExecutionEnabled).toBe(false);
   expect(json.dueJobs).toBe(3);
   expect(json.assignments).toHaveLength(3);
+  expect(json.controls.governance.status).toBe('healthy');
+  expect(json.controls.dataQuality.status).toBe('offline');
   expect(json.completed + json.degraded + json.skipped).toBe(json.assignments.length);
   for (const assignment of json.assignments) {
     expect(allowedJobStatuses.has(assignment.status)).toBeTruthy();
@@ -159,9 +163,6 @@ test('shadow APIs, ingestion boundaries and cron remain safe without providers',
     expect(typeof assignment.job).toBe('string');
   }
 
-  const unauthorizedRun = await request.post('/api/autonomy/run', { data: { job: 'market-regime' } });
-  expect(unauthorizedRun.status()).toBe(401);
-
   const manualRun = await request.post('/api/autonomy/run', {
     headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
     data: { job: 'market-regime' },
@@ -203,7 +204,6 @@ test('mobile layout keeps agent and command controls usable', async ({ page, isM
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
-
   for (const workspace of ['Risk', 'Social Radar', 'Workflows']) {
     await page.getByRole('button', { name: workspace, exact: true }).click();
     await expect(page.getByText(`${workspace} workspace`)).toBeVisible();

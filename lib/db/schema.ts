@@ -141,6 +141,7 @@ export const autonomousActions = pgTable("autonomous_actions", {
 
 export const systemEvents = pgTable("system_events", {
   id: text("id").primaryKey(),
+  eventKey: text("event_key").unique(),
   securityId: text("security_id").references(() => securities.id),
   category: text("category").notNull(),
   severity: text("severity").notNull(),

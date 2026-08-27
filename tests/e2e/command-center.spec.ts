@@ -15,7 +15,7 @@ test('command center loads and key controls work', async ({ page }) => {
   await expect(firstTicker).toContainText('CRBN');
 
   await page.getByText('DRNX', { exact: true }).first().click();
-  await expect(page.locator('.ticker-detail, .detail-grid').getByText('DRNX', { exact: true })).toBeVisible();
+  await expect(page.locator('.ticker-detail h2')).toContainText('DRNX');
 
   await page.getByRole('button', { name: /Run Intelligence Pulse/i }).click();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeEnabled();

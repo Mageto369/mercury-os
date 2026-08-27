@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runSupervisor } from '@/lib/agents/supervisor';
+import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 
 export const runtime = 'nodejs';
 
@@ -12,11 +13,18 @@ export async function GET(request: Request) {
   }
 
   const result = await runSupervisor(new Date());
+  let outcomeMaturation: Awaited<ReturnType<typeof matureOpportunityOutcomes>> | { ok: false; reason: string };
+  try {
+    outcomeMaturation = await matureOpportunityOutcomes(250);
+  } catch (error) {
+    outcomeMaturation = { ok: false, reason: error instanceof Error ? error.message : 'outcome_maturation_failed' };
+  }
 
   return NextResponse.json({
     ok: true,
     mode: result.mode,
     autonomousExecution: false,
+    capitalExecutionEnabled: false,
     supervisor: result.supervisor,
     startedAt: result.startedAt,
     completedAt: result.completedAt,
@@ -26,6 +34,7 @@ export async function GET(request: Request) {
     skipped: result.skipped,
     persistedAudits: result.assignments.filter((assignment) => assignment.persisted).length,
     escalations: result.escalations,
+    outcomeMaturation,
     jobs: result.assignments,
   });
 }

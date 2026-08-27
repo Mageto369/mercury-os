@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { executeAutonomousJobs } from "@/lib/autonomy/executor";
 import { jobsDueAt } from "@/lib/workflows/jobs";
 
 export const runtime = "nodejs";
@@ -13,19 +14,18 @@ export async function GET(request: Request) {
 
   const now = new Date();
   const jobs = jobsDueAt(now);
+  const results = await executeAutonomousJobs(jobs);
 
   return NextResponse.json({
     ok: true,
     startedAt: now.toISOString(),
+    completedAt: new Date().toISOString(),
     mode: "shadow",
     autonomousExecution: false,
-    jobs: jobs.map((job) => ({
-      name: job.name,
-      cadenceMinutes: job.cadenceMinutes,
-      priority: job.priority,
-      shadowOnly: job.shadowOnly,
-      description: job.description,
-      status: "queued-for-provider-wiring",
-    })),
+    dueJobs: jobs.length,
+    completed: results.filter((job) => job.status === "completed").length,
+    degraded: results.filter((job) => job.status === "degraded").length,
+    skipped: results.filter((job) => job.status === "skipped").length,
+    jobs: results,
   });
 }

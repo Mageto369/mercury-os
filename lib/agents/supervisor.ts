@@ -2,6 +2,7 @@ import { runDataQualityAgent, type DataQualityResult } from '@/lib/agents/data-q
 import { runGovernanceAgent, type GovernanceResult } from '@/lib/agents/governance';
 import { recordAgentHeartbeat } from '@/lib/agents/heartbeat';
 import { agentForJob, agentsById, type AgentId } from '@/lib/agents/registry';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { persistAutonomousResult } from '@/lib/autonomy/audit';
 import { executeAutonomousJob, type AutonomousJobResult } from '@/lib/autonomy/executor';
 import { getProviderReadiness } from '@/lib/autonomy/providers';
@@ -144,6 +145,16 @@ export async function runSupervisor(date = new Date(), requestedJobs?: Intellige
     agentId: 'mercury-supervisor', status: summaryStatus, mission: trigger === 'cron' ? 'scheduled-supervision' : 'manual-supervision',
     details: { dueJobs: selected.length, assignments: assignments.length, escalations },
   });
+
+  if (escalations.length) {
+    await routeOperationalAlert({
+      eventKey: `supervisor:${startedAt.toISOString()}`,
+      severity: governance.status === 'degraded' || !guardrails.researchExecutionAllowed ? 'critical' : 'warning',
+      title: 'Mercury Supervisor escalation',
+      message: escalations.join(' | '),
+      payload: { trigger, dueJobs: selected.length, assignmentCount: assignments.length },
+    });
+  }
 
   return {
     supervisor: 'mercury-supervisor', mode: 'shadow', capitalExecutionEnabled: false,

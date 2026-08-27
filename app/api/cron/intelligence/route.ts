@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { jobsForCronPulse } from "@/lib/workflows/jobs";
+import { jobsDueAt } from "@/lib/workflows/jobs";
 
 export const runtime = "nodejs";
 
@@ -11,17 +11,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
 
-  const startedAt = new Date().toISOString();
-  const jobs = jobsForCronPulse();
+  const now = new Date();
+  const jobs = jobsDueAt(now);
 
   return NextResponse.json({
     ok: true,
-    startedAt,
+    startedAt: now.toISOString(),
     mode: "shadow",
     autonomousExecution: false,
     jobs: jobs.map((job) => ({
       name: job.name,
-      cadence: job.cadence,
+      cadenceMinutes: job.cadenceMinutes,
       priority: job.priority,
       shadowOnly: job.shadowOnly,
       description: job.description,

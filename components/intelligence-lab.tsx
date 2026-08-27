@@ -10,10 +10,11 @@ type LabState = {
   portfolio: Record<string, any> | null;
   sources: Record<string, any> | null;
   marketProviders: Record<string, any> | null;
+  history: Record<string, any> | null;
 };
 
 export function IntelligenceLab() {
-  const [state, setState] = useState<LabState>({ signals: null, evidence: null, models: null, risk: null, portfolio: null, sources: null, marketProviders: null });
+  const [state, setState] = useState<LabState>({ signals: null, evidence: null, models: null, risk: null, portfolio: null, sources: null, marketProviders: null, history: null });
 
   useEffect(() => {
     Promise.all([
@@ -24,7 +25,8 @@ export function IntelligenceLab() {
       fetch('/api/portfolio/shadow', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/research/source-reputation?limit=5', { cache: 'no-store' }).then((r) => r.json()),
       fetch('/api/providers/market/status', { cache: 'no-store' }).then((r) => r.json()),
-    ]).then(([signals, evidence, models, risk, portfolio, sources, marketProviders]) => setState({ signals, evidence, models, risk, portfolio, sources, marketProviders }))
+      fetch('/api/research/history', { cache: 'no-store' }).then((r) => r.json()),
+    ]).then(([signals, evidence, models, risk, portfolio, sources, marketProviders, history]) => setState({ signals, evidence, models, risk, portfolio, sources, marketProviders, history }))
       .catch(() => undefined);
   }, []);
 
@@ -39,13 +41,17 @@ export function IntelligenceLab() {
   const providerRows = Array.isArray(state.marketProviders?.providers) ? state.marketProviders.providers : [];
   const configuredProviders = providerRows.filter((provider: any) => provider.configured).length;
   const providerPreference = Array.isArray(state.marketProviders?.preferred) ? state.marketProviders.preferred.join(' → ') : 'massive → intrinio';
+  const historicalBars = Number(state.history?.coverage?.bars ?? 0);
+  const historicalSecurities = Number(state.history?.coverage?.securities ?? 0);
+  const firstBar = state.history?.coverage?.first_bar ? new Date(state.history.coverage.first_bar).toISOString().slice(0, 10) : 'WAITING';
+  const lastBar = state.history?.coverage?.last_bar ? new Date(state.history.coverage.last_bar).toISOString().slice(0, 10) : 'WAITING';
 
   return <section className="workspace" aria-label="Mercury intelligence lab">
     <div className="section-head">
       <div>
         <div className="eyebrow">Institutional research laboratory</div>
         <h2>Mercury Intelligence Lab</h2>
-        <p>Signal provenance, realized evidence, model governance, source reputation, execution capacity, provider failover, and independent survival controls.</p>
+        <p>Signal provenance, historical context, realized evidence, model governance, source reputation, execution capacity, provider failover, and independent survival controls.</p>
       </div>
       <span className="badge warn">SHADOW ONLY</span>
     </div>
@@ -58,11 +64,15 @@ export function IntelligenceLab() {
     </div>
 
     <div className="triple-grid">
-      <div className="surface mini-panel"><h3>Top Source Reputation</h3>{sourceRows.length ? sourceRows.map((source: any) => <div className="source-row" key={`${source.source_type}:${source.source_ref}`}><span>{source.source_ref}<small>{source.source_type}</small></span><b>{source.reliability_score}</b><em>{source.observations} obs</em></div>) : <p className="muted2">Source reputation will populate after outcome-linked social observations mature.</p>}</div>
+      <div className="surface mini-panel"><h3>Historical Replay</h3><div className="rule-stack"><div><span>Daily bars</span><b>{historicalBars.toLocaleString()}</b></div><div><span>Securities covered</span><b>{historicalSecurities}</b></div><div><span>Coverage</span><b>{firstBar} → {lastBar}</b></div></div></div>
       <div className="surface mini-panel"><h3>Market Feed Fabric</h3><div className="rule-stack"><div><span>Configured adapters</span><b>{configuredProviders}/{providerRows.length || 2}</b></div><div><span>Mode</span><b>{String(state.marketProviders?.mode ?? 'auto').toUpperCase()}</b></div><div><span>Failover order</span><b>{providerPreference}</b></div></div></div>
       <div className="surface mini-panel"><h3>Shadow Portfolio</h3><div className="rule-stack"><div><span>Positions</span><b>{positions}</b></div><div><span>Gross exposure</span><b>{Number(state.portfolio?.gross_exposure ?? state.portfolio?.grossExposure ?? 0).toLocaleString()}</b></div><div><span>Execution mode</span><b className="warn">SIMULATED</b></div></div></div>
     </div>
 
-    <div className="surface mini-panel"><h3>Evidence Ladder</h3><div className="rule-stack"><div><span>Research</span><b className="good">AUTONOMOUS</b></div><div><span>Paper review</span><b className="warn">GATED</b></div><div><span>Live capital</span><b className="warn">DISABLED</b></div></div></div>
+    <div className="triple-grid">
+      <div className="surface mini-panel"><h3>Top Source Reputation</h3>{sourceRows.length ? sourceRows.map((source: any) => <div className="source-row" key={`${source.source_type}:${source.source_ref}`}><span>{source.source_ref}<small>{source.source_type}</small></span><b>{source.reliability_score}</b><em>{source.observations} obs</em></div>) : <p className="muted2">Source reputation will populate after outcome-linked social observations mature.</p>}</div>
+      <div className="surface mini-panel"><h3>Historical Twins v2</h3><div className="rule-stack"><div><span>Similarity</span><b>ALPHA + MARKET</b></div><div><span>Context</span><b>20D FINGERPRINT</b></div><div><span>Outcome proof</span><b>MFE / MAE</b></div></div></div>
+      <div className="surface mini-panel"><h3>Evidence Ladder</h3><div className="rule-stack"><div><span>Research</span><b className="good">AUTONOMOUS</b></div><div><span>Paper review</span><b className="warn">GATED</b></div><div><span>Live capital</span><b className="warn">DISABLED</b></div></div></div>
+    </div>
   </section>;
 }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { eq, isNotNull } from 'drizzle-orm';
+import { isNotNull } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { filings, securities } from '@/lib/db/schema';
 import { fetchSecRecentFilings } from '@/lib/providers/sec';

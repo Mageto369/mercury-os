@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { persistAutonomousResult } from "@/lib/autonomy/audit";
 import { executeAutonomousJobs } from "@/lib/autonomy/executor";
 import { jobsDueAt } from "@/lib/workflows/jobs";
 
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   const now = new Date();
   const jobs = jobsDueAt(now);
   const results = await executeAutonomousJobs(jobs);
+  const audits = await Promise.all(results.map((result) => persistAutonomousResult(result, "cron")));
 
   return NextResponse.json({
     ok: true,
@@ -26,6 +28,7 @@ export async function GET(request: Request) {
     completed: results.filter((job) => job.status === "completed").length,
     degraded: results.filter((job) => job.status === "degraded").length,
     skipped: results.filter((job) => job.status === "skipped").length,
+    persistedAudits: audits.filter((audit) => audit.persisted).length,
     jobs: results,
   });
 }

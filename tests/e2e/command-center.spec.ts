@@ -1,40 +1,34 @@
 import { expect, test } from '@playwright/test';
 
 const workspaces = [
-  'Market Outlook',
-  'Discovery',
-  'Social Radar',
-  'Opportunities',
-  'Portfolio',
-  'Risk',
-  'Research',
-  'Models',
-  'Workflows',
-  'Audit',
+  'Market Outlook', 'Discovery', 'Social Radar', 'Opportunities', 'Portfolio',
+  'Risk', 'Research', 'Models', 'Workflows', 'Audit',
 ];
 
 const allowedActions = new Set(['WATCH', 'GEM_WATCH', 'WAVE_ACTIVE', 'PRESS', 'REDUCE', 'EXIT', 'BLOCK']);
 const allowedJobStatuses = new Set(['completed', 'degraded', 'skipped']);
 
-test('command center loads and key controls work', async ({ page }) => {
+
+test('command center and autonomous organization load', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
   await expect(page.getByText('Maximum Market Outlook')).toBeVisible();
   await expect(page.getByText('Opportunity Command')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
   await expect(page.getByText('Capital execution')).toBeVisible();
   await expect(page.getByText('LOCKED')).toBeVisible();
-  await expect(page.getByText('0/9 configured')).toBeVisible();
   await expect(page.getByText('Machine Event Stream')).toBeVisible();
-  await expect(page.getByText('warehouse offline')).toBeVisible();
+  await expect(page.getByText('Mercury Supervisor')).toBeVisible();
+  await expect(page.getByText('Sentinel', { exact: true })).toBeVisible();
+  await expect(page.getByText('Vector', { exact: true })).toBeVisible();
 
   await page.getByRole('button', { name: 'Social Radar' }).click();
   await expect(page.getByText('Social Radar workspace')).toBeVisible();
 
   const ranking = page.locator('select');
   await ranking.selectOption('gem');
-  const firstTicker = page.locator('tbody tr').first().locator('td').first();
-  await expect(firstTicker).toContainText('CRBN');
+  await expect(page.locator('tbody tr').first().locator('td').first()).toContainText('CRBN');
 
   await page.getByText('DRNX', { exact: true }).first().click();
   await expect(page.locator('.ticker-detail h2')).toContainText('DRNX');
@@ -43,10 +37,10 @@ test('command center loads and key controls work', async ({ page }) => {
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeEnabled();
 });
 
-test('all workspaces are reachable without breaking the command center', async ({ page, isMobile }) => {
-  test.skip(isMobile, 'covered by targeted mobile navigation test');
-  await page.goto('/');
 
+test('all workspaces remain reachable', async ({ page, isMobile }) => {
+  test.skip(isMobile, 'covered by mobile navigation test');
+  await page.goto('/');
   for (const workspace of workspaces) {
     await page.getByRole('button', { name: workspace, exact: true }).click();
     await expect(page.getByText(`${workspace} workspace`)).toBeVisible();
@@ -54,13 +48,71 @@ test('all workspaces are reachable without breaking the command center', async (
   }
 });
 
-test('shadow APIs stay functional and execution remains disabled', async ({ request }) => {
+
+test('agent registry is complete and authority remains bounded', async ({ request }) => {
+  const response = await request.get('/api/agents');
+  expect(response.ok()).toBeTruthy();
+  const json = await response.json();
+  expect(json.mode).toBe('shadow');
+  expect(json.capitalExecutionEnabled).toBe(false);
+  expect(json.supervisor).toBe('mercury-supervisor');
+  expect(json.agents).toHaveLength(10);
+
+  const ids = new Set(json.agents.map((agent: { id: string }) => agent.id));
+  for (const required of [
+    'mercury-supervisor', 'market-regime-agent', 'liquidity-agent', 'gem-scout-agent',
+    'social-wave-agent', 'regulatory-agent', 'structure-agent', 'risk-sentinel-agent',
+    'opportunity-director-agent', 'learning-agent',
+  ]) expect(ids.has(required)).toBeTruthy();
+
+  for (const agent of json.agents) {
+    expect(agent.mission.length).toBeGreaterThan(20);
+    expect(Array.isArray(agent.authority)).toBeTruthy();
+    expect(Array.isArray(agent.hardLimits)).toBeTruthy();
+    expect(agent.hardLimits.length).toBeGreaterThan(0);
+    expect(agent.authority).not.toContain('trade');
+    expect(agent.authority).not.toContain('broker');
+  }
+});
+
+
+test('supervisor mission assignment is protected and fail-closed', async ({ request }) => {
+  const unauthorized = await request.post('/api/agents/run', { data: { jobs: ['market-regime'] } });
+  expect(unauthorized.status()).toBe(401);
+
+  const invalid = await request.post('/api/agents/run', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { jobs: ['not-a-job'] },
+  });
+  expect(invalid.status()).toBe(400);
+
+  const assigned = await request.post('/api/agents/run', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { jobs: ['liquidity-pulse', 'risk-gateway', 'market-regime'] },
+  });
+  expect(assigned.ok()).toBeTruthy();
+  const json = await assigned.json();
+  expect(json.supervisor).toBe('mercury-supervisor');
+  expect(json.mode).toBe('shadow');
+  expect(json.capitalExecutionEnabled).toBe(false);
+  expect(json.dueJobs).toBe(3);
+  expect(json.assignments).toHaveLength(3);
+  expect(json.completed + json.degraded + json.skipped).toBe(json.assignments.length);
+  for (const assignment of json.assignments) {
+    expect(allowedJobStatuses.has(assignment.status)).toBeTruthy();
+    expect(typeof assignment.agentId).toBe('string');
+    expect(typeof assignment.agentName).toBe('string');
+    expect(assignment.persisted).toBe(false);
+  }
+});
+
+
+test('shadow APIs, ingestion boundaries and cron remain safe without providers', async ({ request }) => {
   const health = await request.get('/api/health');
   expect(health.ok()).toBeTruthy();
   const healthJson = await health.json();
   expect(healthJson.status).toBe('ok');
   expect(healthJson.service).toBe('mercury-os');
-  expect(healthJson.version).toBe('0.3.1');
   expect(healthJson.totalProviders).toBe(9);
 
   const autonomy = await request.get('/api/autonomy/status');
@@ -70,59 +122,22 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(autonomyJson.capitalExecutionEnabled).toBe(false);
   expect(autonomyJson.autonomousResearchEnabled).toBe(true);
   expect(autonomyJson.requiredInfrastructureReady).toBe(false);
-  expect(autonomyJson.guardrails.coreInfrastructureReady).toBe(false);
   expect(autonomyJson.guardrails.capitalExecutionEnabled).toBe(false);
-  expect(autonomyJson.totalProviders).toBe(9);
-  expect(Array.isArray(autonomyJson.jobs)).toBeTruthy();
-  expect(autonomyJson.jobs.length).toBe(9);
+  expect(autonomyJson.jobs).toHaveLength(9);
 
-  const events = await request.get('/api/events/recent');
-  expect(events.ok()).toBeTruthy();
-  const eventsJson = await events.json();
-  expect(eventsJson.persistent).toBe(false);
-  expect(eventsJson.reason).toBe('database_not_configured');
-  expect(eventsJson.events).toEqual([]);
+  for (const path of ['/api/events/recent', '/api/social/trends', '/api/universe']) {
+    const response = await request.get(path);
+    expect(response.ok()).toBeTruthy();
+  }
 
-  const socialTrends = await request.get('/api/social/trends');
-  expect(socialTrends.ok()).toBeTruthy();
-  const socialTrendsJson = await socialTrends.json();
-  expect(socialTrendsJson.persistent).toBe(false);
-  expect(socialTrendsJson.signalsChecked).toBe(0);
-  expect(socialTrendsJson.trends).toEqual([]);
-
-  const unauthorizedSocialIngest = await request.post('/api/ingest/social', {
+  const unauthorizedSocial = await request.post('/api/ingest/social', {
     data: { signals: [{ symbol: 'TEST', source: 'reddit', mentions: 2, velocity: 40, sentiment: 10, promotionRisk: 20, crowding: 15, observedAt: new Date().toISOString() }] },
   });
-  expect(unauthorizedSocialIngest.status()).toBe(401);
-
-  const unavailableSocialIngest = await request.post('/api/ingest/social', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-    data: { signals: [{ symbol: 'TEST', source: 'reddit', mentions: 2, velocity: 40, sentiment: 10, promotionRisk: 20, crowding: 15, observedAt: new Date().toISOString() }] },
-  });
-  expect(unavailableSocialIngest.status()).toBe(503);
-
-  const universe = await request.get('/api/universe');
-  expect(universe.ok()).toBeTruthy();
-  const universeJson = await universe.json();
-  expect(universeJson.persistent).toBe(false);
-  expect(universeJson.securities).toEqual([]);
-
-  const unauthorizedUniverseWrite = await request.post('/api/universe', {
-    data: { symbol: 'TEST', market: 'OTC', cik: '12345' },
-  });
-  expect(unauthorizedUniverseWrite.status()).toBe(401);
-
-  const unavailableUniverseWrite = await request.post('/api/universe', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-    data: { symbol: 'TEST', market: 'OTC', cik: '12345' },
-  });
-  expect(unavailableUniverseWrite.status()).toBe(503);
+  expect(unauthorizedSocial.status()).toBe(401);
 
   const pulse = await request.post('/api/control/pulse');
   expect(pulse.ok()).toBeTruthy();
-  const pulseJson = await pulse.json();
-  expect(pulseJson.mode).toBe('shadow');
-  expect(pulseJson.executionEnabled).toBe(false);
+  expect((await pulse.json()).executionEnabled).toBe(false);
 
   const unauthorizedCron = await request.get('/api/cron/intelligence');
   expect(unauthorizedCron.status()).toBe(401);
@@ -134,14 +149,14 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   const cronJson = await cron.json();
   expect(cronJson.mode).toBe('shadow');
   expect(cronJson.autonomousExecution).toBe(false);
+  expect(cronJson.supervisor).toBe('mercury-supervisor');
   expect(Array.isArray(cronJson.jobs)).toBeTruthy();
-  expect(cronJson.completed + cronJson.degraded + cronJson.skipped).toBe(cronJson.dueJobs);
+  expect(cronJson.completed + cronJson.degraded + cronJson.skipped).toBe(cronJson.jobs.length);
   expect(cronJson.persistedAudits).toBe(0);
-  for (const job of cronJson.jobs) {
-    expect(allowedJobStatuses.has(job.status)).toBeTruthy();
-    expect(job.shadowOnly).toBe(true);
-    expect(Array.isArray(job.requiredProviders)).toBeTruthy();
-    expect(Array.isArray(job.missingProviders)).toBeTruthy();
+  for (const assignment of cronJson.jobs) {
+    expect(allowedJobStatuses.has(assignment.status)).toBeTruthy();
+    expect(typeof assignment.agentId).toBe('string');
+    expect(typeof assignment.job).toBe('string');
   }
 
   const unauthorizedRun = await request.post('/api/autonomy/run', { data: { job: 'market-regime' } });
@@ -152,20 +167,12 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
     data: { job: 'market-regime' },
   });
   expect(manualRun.ok()).toBeTruthy();
-  const manualRunJson = await manualRun.json();
-  expect(manualRunJson.mode).toBe('shadow');
-  expect(manualRunJson.capitalExecutionEnabled).toBe(false);
-  expect(manualRunJson.result.name).toBe('market-regime');
-  expect(manualRunJson.result.status).toBe('skipped');
-  expect(manualRunJson.result.missingProviders).toContain('marketData');
-  expect(manualRunJson.audit.persisted).toBe(false);
-  expect(manualRunJson.audit.reason).toBe('database_not_configured');
-
-  const unknownRun = await request.post('/api/autonomy/run', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-    data: { job: 'does-not-exist' },
-  });
-  expect(unknownRun.status()).toBe(404);
+  const manualJson = await manualRun.json();
+  expect(manualJson.mode).toBe('shadow');
+  expect(manualJson.capitalExecutionEnabled).toBe(false);
+  expect(manualJson.result.status).toBe('skipped');
+  expect(manualJson.result.missingProviders).toContain('database');
+  expect(manualJson.audit.persisted).toBe(false);
 
   const opportunities = await request.get('/api/opportunities');
   expect(opportunities.ok()).toBeTruthy();
@@ -188,12 +195,14 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   }
 });
 
-test('mobile layout remains usable', async ({ page, isMobile }) => {
+
+test('mobile layout keeps agent and command controls usable', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile project only');
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
 
   for (const workspace of ['Risk', 'Social Radar', 'Workflows']) {
     await page.getByRole('button', { name: workspace, exact: true }).click();

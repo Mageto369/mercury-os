@@ -20,7 +20,7 @@ export async function GET() {
   return NextResponse.json({
     status: "ok",
     service: "mercury-os",
-    version: "0.2.0",
+    version: "0.3.1",
     configuredProviders: configured,
     totalProviders: Object.keys(providers).length,
     providers,

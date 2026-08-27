@@ -46,7 +46,7 @@ export async function runShadowActivation() {
     };
   }
 
-  const supervisor = await runSupervisor(new Date(), [...activationJobs], 'activation');
+  const supervisor = await runSupervisor(new Date(), [...activationJobs], 'manual');
   const [readiness, performance, fleet] = await Promise.all([
     getProductionReadiness(),
     getShadowPerformance(),

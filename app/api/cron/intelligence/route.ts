@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { runSupervisor } from '@/lib/agents/supervisor';
 import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
+import { refreshSourceReputation } from '@/lib/research/source-reputation';
 
 export const runtime = 'nodejs';
 
@@ -14,10 +15,16 @@ export async function GET(request: Request) {
 
   const result = await runSupervisor(new Date());
   let outcomeMaturation: Awaited<ReturnType<typeof matureOpportunityOutcomes>> | { ok: false; reason: string };
+  let sourceReputation: Awaited<ReturnType<typeof refreshSourceReputation>> | { ok: false; reason: string };
   try {
     outcomeMaturation = await matureOpportunityOutcomes(250);
   } catch (error) {
     outcomeMaturation = { ok: false, reason: error instanceof Error ? error.message : 'outcome_maturation_failed' };
+  }
+  try {
+    sourceReputation = await refreshSourceReputation();
+  } catch (error) {
+    sourceReputation = { ok: false, reason: error instanceof Error ? error.message : 'source_reputation_failed' };
   }
 
   return NextResponse.json({
@@ -35,6 +42,7 @@ export async function GET(request: Request) {
     persistedAudits: result.assignments.filter((assignment) => assignment.persisted).length,
     escalations: result.escalations,
     outcomeMaturation,
+    sourceReputation,
     jobs: result.assignments,
   });
 }

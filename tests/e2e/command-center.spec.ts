@@ -14,6 +14,7 @@ const workspaces = [
 ];
 
 const allowedActions = new Set(['WATCH', 'GEM_WATCH', 'WAVE_ACTIVE', 'PRESS', 'REDUCE', 'EXIT', 'BLOCK']);
+const allowedJobStatuses = new Set(['completed', 'degraded', 'skipped']);
 
 test('command center loads and key controls work', async ({ page }) => {
   await page.goto('/');
@@ -56,6 +57,16 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(healthJson.version).toBe('0.3.1');
   expect(healthJson.totalProviders).toBe(9);
 
+  const autonomy = await request.get('/api/autonomy/status');
+  expect(autonomy.ok()).toBeTruthy();
+  const autonomyJson = await autonomy.json();
+  expect(autonomyJson.mode).toBe('shadow');
+  expect(autonomyJson.capitalExecutionEnabled).toBe(false);
+  expect(autonomyJson.autonomousResearchEnabled).toBe(true);
+  expect(autonomyJson.totalProviders).toBe(9);
+  expect(Array.isArray(autonomyJson.jobs)).toBeTruthy();
+  expect(autonomyJson.jobs.length).toBe(9);
+
   const pulse = await request.post('/api/control/pulse');
   expect(pulse.ok()).toBeTruthy();
   const pulseJson = await pulse.json();
@@ -73,6 +84,34 @@ test('shadow APIs stay functional and execution remains disabled', async ({ requ
   expect(cronJson.mode).toBe('shadow');
   expect(cronJson.autonomousExecution).toBe(false);
   expect(Array.isArray(cronJson.jobs)).toBeTruthy();
+  expect(cronJson.completed + cronJson.degraded + cronJson.skipped).toBe(cronJson.dueJobs);
+  for (const job of cronJson.jobs) {
+    expect(allowedJobStatuses.has(job.status)).toBeTruthy();
+    expect(job.shadowOnly).toBe(true);
+    expect(Array.isArray(job.requiredProviders)).toBeTruthy();
+    expect(Array.isArray(job.missingProviders)).toBeTruthy();
+  }
+
+  const unauthorizedRun = await request.post('/api/autonomy/run', { data: { job: 'market-regime' } });
+  expect(unauthorizedRun.status()).toBe(401);
+
+  const manualRun = await request.post('/api/autonomy/run', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { job: 'market-regime' },
+  });
+  expect(manualRun.ok()).toBeTruthy();
+  const manualRunJson = await manualRun.json();
+  expect(manualRunJson.mode).toBe('shadow');
+  expect(manualRunJson.capitalExecutionEnabled).toBe(false);
+  expect(manualRunJson.result.name).toBe('market-regime');
+  expect(manualRunJson.result.status).toBe('skipped');
+  expect(manualRunJson.result.missingProviders).toContain('marketData');
+
+  const unknownRun = await request.post('/api/autonomy/run', {
+    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
+    data: { job: 'does-not-exist' },
+  });
+  expect(unknownRun.status()).toBe(404);
 
   const opportunities = await request.get('/api/opportunities');
   expect(opportunities.ok()).toBeTruthy();

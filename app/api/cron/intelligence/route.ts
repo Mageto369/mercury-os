@@ -3,6 +3,7 @@ import { runSupervisor } from '@/lib/agents/supervisor';
 import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 import { refreshSourceReputation } from '@/lib/research/source-reputation';
 import { buildShadowPortfolio } from '@/lib/portfolio/shadow-portfolio';
+import { pullAndPersistMarketData } from '@/lib/providers/market/router';
 
 export const runtime = 'nodejs';
 
@@ -12,6 +13,13 @@ export async function GET(request: Request) {
 
   if (secret && auth !== `Bearer ${secret}`) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  }
+
+  let marketRefresh: Awaited<ReturnType<typeof pullAndPersistMarketData>> | { ok: false; reason: string };
+  try {
+    marketRefresh = await pullAndPersistMarketData();
+  } catch (error) {
+    marketRefresh = { ok: false, reason: error instanceof Error ? error.message : 'market_refresh_failed' };
   }
 
   const result = await runSupervisor(new Date());
@@ -48,6 +56,7 @@ export async function GET(request: Request) {
     skipped: result.skipped,
     persistedAudits: result.assignments.filter((assignment) => assignment.persisted).length,
     escalations: result.escalations,
+    marketRefresh,
     outcomeMaturation,
     sourceReputation,
     shadowPortfolio,

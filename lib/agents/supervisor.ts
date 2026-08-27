@@ -86,7 +86,11 @@ async function runOpportunityDirector(): Promise<AgentAssignmentResult> {
   }
 }
 
-export async function runSupervisor(date = new Date(), requestedJobs?: IntelligenceJobName[]): Promise<SupervisorRunResult> {
+export async function runSupervisor(
+  date = new Date(),
+  requestedJobs?: IntelligenceJobName[],
+  trigger: 'cron' | 'manual' = 'cron',
+): Promise<SupervisorRunResult> {
   const startedAt = new Date();
   const readiness = getProviderReadiness();
   const guardrails = evaluateAutonomyGuardrails();
@@ -112,7 +116,7 @@ export async function runSupervisor(date = new Date(), requestedJobs?: Intellige
   } else {
     for (const job of sortJobs(selected)) {
       const result = await executeAutonomousJob(job);
-      const audit = await persistAutonomousResult(result, 'cron');
+      const audit = await persistAutonomousResult(result, trigger);
       assignments.push(assignmentFromResult(result, audit.persisted));
       if (result.status === 'degraded' && job.priority === 'critical') {
         escalations.push(`${job.name}: ${result.message}`);

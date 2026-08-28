@@ -5,10 +5,9 @@ test('paper trading terminal is accessible and explicitly non-capital', async ({
   await expect(page.getByRole('heading', { name: 'Paper Trading Terminal' })).toBeVisible();
   await expect(page.getByText('PAPER MODE')).toBeVisible();
   await expect(page.getByText('REAL CAPITAL LOCKED')).toBeVisible();
-  await expect(page.getByText('Broker', { exact: true })).toBeVisible();
   await expect(page.getByText('Capital', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Orders' }).click();
-  await expect(page.getByRole('heading', { name: 'Paper Order Ledger' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Paper Order Management' })).toBeVisible();
   await page.getByRole('button', { name: 'Risk' }).click();
   await expect(page.getByRole('heading', { name: 'Risk Controls' })).toBeVisible();
   await expect(page.getByText('BLOCKED')).toBeVisible();

@@ -23,7 +23,10 @@ const mutations = routeFiles.flatMap((file) => {
     .map((method) => ({ method, route: apiPath(file) }));
 });
 
-const approvedUnauthenticated2xx = new Set(['POST /api/control/pulse']);
+const approvedUnauthenticated2xx = new Set([
+  'POST /api/control/pulse',
+  'DELETE /api/admin/session',
+]);
 
 async function invoke(request: APIRequestContext, method: typeof methods[number], route: string) {
   return request.fetch(route, {

@@ -31,7 +31,7 @@ export async function computeSetupFingerprints(limit = 500) {
       FROM historical_bars
       WHERE security_id = ${String(opportunity.security_id)}
         AND timeframe = '1d'
-        AND bar_time <= ${new Date(String(opportunity.observed_at))}
+        AND bar_time < date_trunc('day', ${new Date(String(opportunity.observed_at))})
       ORDER BY bar_time DESC
       LIMIT 21
     `;

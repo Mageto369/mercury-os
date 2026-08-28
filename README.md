@@ -73,7 +73,7 @@ Configure `CRON_SECRET` and `DATABASE_URL` first. Then add only authorized provi
 Every main-branch release runs:
 
 ```bash
-npm install
+npm ci
 npm audit --audit-level=moderate
 npm run typecheck
 npm run build

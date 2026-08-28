@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from hmac import compare_digest
 from datetime import date
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
@@ -8,7 +9,8 @@ from typing import Any
 import financedatabase as fd
 import pandas_market_calendars as mcal
 from edgar import Company, set_identity
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 from fredapi import Fred
 from sec_cik_mapper import StockMapper
 
@@ -16,6 +18,26 @@ app = FastAPI(title="Mercury Open Intelligence Sidecar", version="1.0.0")
 
 _mapper: StockMapper | None = None
 _equities: Any | None = None
+
+
+def sidecar_access(authorization: str | None) -> tuple[bool, int, str | None]:
+    expected = os.getenv("MERCURY_SIDECAR_TOKEN")
+    if not expected:
+        return False, 503, "sidecar_token_not_configured"
+    supplied = authorization or ""
+    if not compare_digest(supplied, f"Bearer {expected}"):
+        return False, 401, "unauthorized"
+    return True, 200, None
+
+
+@app.middleware("http")
+async def require_sidecar_token(request: Request, call_next):
+    if request.url.path == "/health":
+        return await call_next(request)
+    allowed, status, detail = sidecar_access(request.headers.get("authorization"))
+    if not allowed:
+        return JSONResponse(status_code=status, content={"detail": detail})
+    return await call_next(request)
 
 
 def package_version(name: str) -> str | None:

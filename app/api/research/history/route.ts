@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-  const body = await request.json().catch(() => ({})) as { startDate?: string; endDate?: string; provider?: 'massive' | 'intrinio' | 'auto'; computeFingerprints?: boolean };
+  const body = await request.json().catch(() => ({})) as { startDate?: string; endDate?: string; provider?: 'massive' | 'intrinio' | 'openbb' | 'auto'; computeFingerprints?: boolean };
   const result = await backfillHistoricalMarket({ startDate: body.startDate, endDate: body.endDate, provider: body.provider });
   if (!result.ok) return NextResponse.json(result, { status: result.reason === 'database_not_configured' ? 503 : 400 });
   const fingerprints = body.computeFingerprints === false ? null : await computeSetupFingerprints(1000);

@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { runSupervisor } from '@/lib/agents/supervisor';
+import { requireBearerSecret } from '@/lib/security/request-auth';
 
 export const runtime = 'nodejs';
 
@@ -21,11 +22,9 @@ const requestSchema = z.object({
 });
 
 export async function POST(request: Request) {
-  const auth = request.headers.get('authorization');
-  const secret = process.env.CRON_SECRET;
-
-  if (secret && auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const access = requireBearerSecret(request, process.env.CRON_SECRET);
+  if (!access.ok) {
+    return NextResponse.json({ ok: false, error: access.reason }, { status: access.status });
   }
 
   const parsed = requestSchema.safeParse(await request.json().catch(() => null));

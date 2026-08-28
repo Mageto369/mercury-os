@@ -9,13 +9,13 @@ import { runOpenIntelligenceSync } from '@/lib/integrations/open-intelligence-sy
 import { runDeepIntelligence } from '@/lib/intelligence/deep-intelligence';
 import { buildEntityRelationshipGraph } from '@/lib/intelligence/entity-graph';
 import { runSignalAttribution } from '@/lib/intelligence/signal-attribution';
+import { requireBearerSecret } from '@/lib/security/request-auth';
 
 export const runtime = 'nodejs';
 
 export async function GET(request: Request) {
-  const auth = request.headers.get('authorization');
-  const secret = process.env.CRON_SECRET;
-  if (secret && auth !== `Bearer ${secret}`) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  const access = requireBearerSecret(request, process.env.CRON_SECRET);
+  if (!access.ok) return NextResponse.json({ ok: false, error: access.reason }, { status: access.status });
 
   let marketRefresh: Awaited<ReturnType<typeof pullAndPersistMarketData>> | { ok:false; reason:string };
   let openDataRefresh: Awaited<ReturnType<typeof runOpenDataMesh>> | { ok:false; reason:string };

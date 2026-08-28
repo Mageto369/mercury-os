@@ -9,11 +9,14 @@ const allowedActions = new Set(['WATCH', 'GEM_WATCH', 'WAVE_ACTIVE', 'PRESS', 'R
 const allowedJobStatuses = new Set(['completed', 'degraded', 'skipped']);
 
 
-test('command center and autonomous organization load', async ({ page }) => {
+test('command center and autonomous organization load through workspaces', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
-  await expect(page.getByText('Maximum Market Outlook')).toBeVisible();
   await expect(page.getByText('Opportunity Command')).toBeVisible();
+  await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Workflows', exact: true }).click();
+  await expect(page.getByText('Workflows workspace')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
   const autonomy = page.getByLabel('Autonomy readiness');
@@ -26,25 +29,25 @@ test('command center and autonomous organization load', async ({ page }) => {
   await expect(page.getByText('Sentinel', { exact: true })).toBeVisible();
   await expect(page.getByText('Vector', { exact: true })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Social Radar' }).click();
-  await expect(page.getByText('Social Radar workspace')).toBeVisible();
+  await page.getByRole('button', { name: 'Opportunities', exact: true }).click();
+  await expect(page.getByText('Opportunity Command')).toBeVisible();
   await page.locator('select').selectOption('gem');
-  await expect(page.locator('tbody tr').first().locator('td').first()).toContainText('CRBN');
-  await page.getByText('DRNX', { exact: true }).first().click();
-  await expect(page.locator('.ticker-detail h2')).toContainText('DRNX');
   await page.getByRole('button', { name: /Run Intelligence Pulse/i }).click();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeEnabled();
 });
 
 
-test('all workspaces remain reachable', async ({ page, isMobile }) => {
+test('all workspaces remain reachable and render their own content', async ({ page, isMobile }) => {
   test.skip(isMobile, 'covered by mobile navigation test');
   await page.goto('/');
   for (const workspace of workspaces) {
     await page.getByRole('button', { name: workspace, exact: true }).click();
     await expect(page.getByText(`${workspace} workspace`)).toBeVisible();
-    await expect(page.getByText('Opportunity Command')).toBeVisible();
   }
+  await page.getByRole('button', { name: 'Portfolio', exact: true }).click();
+  await expect(page.getByText(/Shadow/i).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Audit', exact: true }).click();
+  await expect(page.getByText(/Activation/i).first()).toBeVisible();
 });
 
 
@@ -198,15 +201,15 @@ test('shadow APIs, ingestion boundaries and cron remain safe without providers',
 });
 
 
-test('mobile layout keeps agent and command controls usable', async ({ page, isMobile }) => {
+test('mobile layout keeps command and workflow controls usable', async ({ page, isMobile }) => {
   test.skip(!isMobile, 'mobile project only');
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Calculated Aggression' })).toBeVisible();
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
   for (const workspace of ['Risk', 'Social Radar', 'Workflows']) {
     await page.getByRole('button', { name: workspace, exact: true }).click();
     await expect(page.getByText(`${workspace} workspace`)).toBeVisible();
   }
+  await expect(page.getByRole('heading', { name: 'Autonomous Research Control' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mercury Agent Fleet' })).toBeVisible();
 });

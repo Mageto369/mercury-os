@@ -1,6 +1,7 @@
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const COOKIE = 'mercury_admin_session';
+const DEFAULT_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
 function token() {
   return process.env.MERCURY_ADMIN_TOKEN ?? '';
@@ -22,23 +23,33 @@ export function verifyAdminToken(candidate: string | null | undefined) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function adminSessionValue() {
-  if (!adminConfigured()) return '';
-  return digest('mercury-admin-session:v1');
+export function adminSessionMaxAgeSeconds() {
+  const configured = Number(process.env.MERCURY_ADMIN_SESSION_MAX_AGE_SECONDS ?? DEFAULT_SESSION_MAX_AGE_SECONDS);
+  return Number.isInteger(configured) && configured >= 300 && configured <= 86_400 ? configured : DEFAULT_SESSION_MAX_AGE_SECONDS;
 }
 
-export function adminAuthorized(request: Request) {
+export function adminSessionValue(nowSeconds = Math.floor(Date.now() / 1000)) {
+  if (!adminConfigured()) return '';
+  const payload = `v2.${nowSeconds}.${randomBytes(16).toString('hex')}`;
+  return `${payload}.${digest(payload)}`;
+}
+
+export function adminAuthorized(request: Request, nowSeconds = Math.floor(Date.now() / 1000)) {
   if (!adminConfigured()) return false;
   const cookie = request.headers.get('cookie') ?? '';
   const session = cookie.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${COOKIE}=`))?.slice(COOKIE.length + 1);
-  const expected = adminSessionValue();
-  if (!session || !expected) return false;
-  const a = Buffer.from(session);
+  if (!session) return false;
+  const parts = session.split('.');
+  if (parts.length !== 4 || parts[0] !== 'v2' || !/^\d+$/.test(parts[1]) || !/^[a-f0-9]{32}$/.test(parts[2]) || !/^[a-f0-9]{64}$/.test(parts[3])) return false;
+  const issuedAt = Number(parts[1]);
+  if (!Number.isSafeInteger(issuedAt) || issuedAt > nowSeconds + 60 || nowSeconds - issuedAt > adminSessionMaxAgeSeconds()) return false;
+  const expected = digest(parts.slice(0, 3).join('.'));
+  const a = Buffer.from(parts[3]);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-export function adminCookie(value: string, maxAgeSeconds = 60 * 60 * 8) {
+export function adminCookie(value: string, maxAgeSeconds = adminSessionMaxAgeSeconds()) {
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
   return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}${secure}`;
 }

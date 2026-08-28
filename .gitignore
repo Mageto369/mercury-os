@@ -1,6 +1,7 @@
 node_modules/
 .next/
 .vercel/
+supabase/.temp/
 
 next-env.d.ts
 *.tsbuildinfo

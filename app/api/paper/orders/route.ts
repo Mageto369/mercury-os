@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getSql } from '@/lib/db';
@@ -23,6 +23,31 @@ const OrderSchema = z.object({
   if (value.orderType === 'limit' && value.limitPrice == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limitPrice'], message: 'Limit price required' });
 });
 
+const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9._:-]{16,128}$/);
+
+function replayOrder(order: Record<string, unknown>) {
+  const status = String(order.status);
+  const rejected = status === 'rejected';
+  return {
+    status: rejected ? 409 : status === 'open' ? 202 : 200,
+    body: {
+      ok: !rejected,
+      error: rejected ? String(order.reject_reason ?? 'paper_order_rejected') : undefined,
+      orderId: String(order.id),
+      status,
+      side: String(order.side),
+      quantity: Number(order.requested_qty),
+      requestedPrice: order.requested_price == null ? null : Number(order.requested_price),
+      fillPrice: order.average_fill_price == null ? null : Number(order.average_fill_price),
+      feeAmount: Number(order.fee_amount ?? 0),
+      simulation: order.simulation,
+      idempotentReplay: true,
+      capitalExecutionEnabled: false,
+      brokerConnected: false,
+    },
+  };
+}
+
 export async function POST(request: Request) {
   if (!sameOriginMutation(request)) return NextResponse.json({ ok:false, error:'origin_mismatch' }, { status:403 });
   if (!adminAuthorized(request)) return NextResponse.json({ ok:false, error:'admin_session_required' }, { status:401 });
@@ -32,6 +57,10 @@ export async function POST(request: Request) {
   const parsed = OrderSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ ok:false, error:'invalid_order', issues:parsed.error.flatten() }, { status:400 });
   const input = parsed.data;
+  const parsedIdempotencyKey = IdempotencyKeySchema.safeParse(request.headers.get('idempotency-key'));
+  if (!parsedIdempotencyKey.success) return NextResponse.json({ ok:false, error:'valid_idempotency_key_required' }, { status:400 });
+  const idempotencyKey = parsedIdempotencyKey.data;
+  const requestFingerprint = createHash('sha256').update(JSON.stringify(input)).digest('hex');
 
   try {
     await ensurePaperAccount();
@@ -58,6 +87,11 @@ export async function POST(request: Request) {
       const feeAmount = Number((notional * commissionBps / 10_000).toFixed(6));
 
       const [account] = await tx`select * from paper_accounts where id=${DEFAULT_PAPER_ACCOUNT_ID} for update`;
+      const [existing] = await tx`select id,security_id,side,requested_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,reject_reason,simulation,request_fingerprint from paper_orders where idempotency_key=${idempotencyKey} limit 1`;
+      if (existing) {
+        if (String(existing.request_fingerprint) !== requestFingerprint) return { status:409, body:{ ok:false, error:'idempotency_key_reused', orderId:String(existing.id), capitalExecutionEnabled:false } };
+        return replayOrder(existing as Record<string, unknown>);
+      }
       const [position] = await tx`select * from paper_positions where account_id=${DEFAULT_PAPER_ACCOUNT_ID} and security_id=${security.id} for update`;
       const currentQty = Number(position?.quantity ?? 0);
       const currentAvg = Number(position?.average_cost ?? 0);
@@ -66,7 +100,7 @@ export async function POST(request: Request) {
       if (input.orderType === 'limit') {
         const crosses = input.side === 'buy' ? requestedPrice >= referencePrice : requestedPrice <= referencePrice;
         if (!crosses) {
-          await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,status,order_type,time_in_force,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},'open',${input.orderType},${input.timeInForce},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
+          await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,status,order_type,time_in_force,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},'open',${input.orderType},${input.timeInForce},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false,brokerConnected:false})},false,${idempotencyKey},${requestFingerprint})`;
           await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'accepted','open',${tx.json({referencePrice,requestedPrice,timeInForce:input.timeInForce})})`;
           await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at,opportunityState:opportunity?.state ?? null})})`;
           return { status:202, body:{ ok:true, orderId, status:'open', symbol:security.symbol, side:input.side, quantity:input.quantity, requestedPrice, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
@@ -79,7 +113,7 @@ export async function POST(request: Request) {
       if (input.side === 'sell' && currentQty < input.quantity) rejectReason = 'insufficient_virtual_position';
 
       if (rejectReason) {
-        await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,slippage_bps,reject_reason,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},null,'rejected',${input.orderType},${input.timeInForce},0,${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false})},false)`;
+        await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,slippage_bps,reject_reason,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},null,'rejected',${input.orderType},${input.timeInForce},0,${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false})},false,${idempotencyKey},${requestFingerprint})`;
         await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'rejected','rejected',${tx.json({reason:rejectReason,referencePrice})})`;
         await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context,outcome) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at})},${tx.json({status:'rejected',reason:rejectReason})})`;
         return { status:409, body:{ ok:false, error:rejectReason, orderId, simulation, capitalExecutionEnabled:false } };
@@ -98,7 +132,7 @@ export async function POST(request: Request) {
         await tx`update paper_accounts set cash=cash+${proceeds - feeAmount},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       }
 
-      await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,latency_ms,slippage_bps,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',${input.orderType},${input.timeInForce},${feeAmount},0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,referencePrice,fillPrice,commissionBps,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
+      await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,latency_ms,slippage_bps,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',${input.orderType},${input.timeInForce},${feeAmount},0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,referencePrice,fillPrice,commissionBps,capitalExecutionEnabled:false,brokerConnected:false})},false,${idempotencyKey},${requestFingerprint})`;
       await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'filled','filled',${tx.json({referencePrice,fillPrice,feeAmount,slippageBps:simulation.estimatedOneWayCostBps})})`;
       await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context,outcome) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at,opportunityState:opportunity?.state ?? null})},${tx.json({status:'filled',fillPrice,feeAmount,slippageBps:simulation.estimatedOneWayCostBps})})`;
 

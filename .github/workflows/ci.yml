@@ -31,7 +31,8 @@ jobs:
           cache-dependency-path: services/open-intelligence/requirements.txt
       - run: pip install -r services/open-intelligence/requirements.txt
       - run: pip check
-      - run: python -m py_compile services/open-intelligence/app/main.py services/open-intelligence/smoke_test.py services/open-intelligence/stress_test.py
+      - run: python -m py_compile services/open-intelligence/index.py services/open-intelligence/app/main.py services/open-intelligence/smoke_test.py services/open-intelligence/stress_test.py
+      - run: cd services/open-intelligence && python -c "from index import app; assert app.title == 'Mercury Open Intelligence Sidecar'"
       - run: cd services/open-intelligence && python -c "from app.main import app; assert app.title == 'Mercury Open Intelligence Sidecar'"
       - run: cd services/open-intelligence && python smoke_test.py
       - run: cd services/open-intelligence && python stress_test.py
@@ -47,6 +48,7 @@ jobs:
           cache-dependency-path: services/research-proof/requirements.txt
       - run: pip install -r services/research-proof/requirements.txt
       - run: pip check
-      - run: python -m py_compile services/research-proof/app/main.py services/research-proof/smoke_test.py
+      - run: python -m py_compile services/research-proof/index.py services/research-proof/app/main.py services/research-proof/smoke_test.py
+      - run: cd services/research-proof && python -c "from index import app; assert app.title == 'Mercury Research & Proof Sidecar'"
       - run: cd services/research-proof && python -c "from app.main import app; assert app.title == 'Mercury Research & Proof Sidecar'"
       - run: cd services/research-proof && python smoke_test.py

@@ -31,7 +31,7 @@ export async function GET() {
       select
         po.id,
         s.symbol,
-        s.exchange,
+        s.market,
         po.opportunity_id,
         po.side,
         po.requested_qty,

@@ -10,8 +10,9 @@ test('admin suite is visible but protected when runtime admin token is absent', 
   expect(settings.status()).toBe(401);
 
   await page.goto('/admin');
-  await expect(page.getByText('Admin Suite')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Admin Suite', exact: true })).toBeVisible();
   if (!body.configured) {
-    await expect(page.getByText(/MERCURY_ADMIN_TOKEN is not configured/i)).toBeVisible();
+    await expect(page.getByRole('heading', { name: /Admin access is not configured yet/i })).toBeVisible();
+    await expect(page.getByText(/MERCURY_ADMIN_TOKEN/i).first()).toBeVisible();
   }
 });

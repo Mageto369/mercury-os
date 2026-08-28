@@ -8,7 +8,7 @@ function hash(value: unknown) { return createHash('sha256').update(JSON.stringif
 async function health(provider: string, configured: boolean, authoritative: boolean, result: { ok: boolean; latencyMs: number; records: number; error?: string }) {
   const sql = getSql(); if (!sql) return;
   await sql`INSERT INTO provider_health (provider, provider_group, configured, authoritative, last_status, consecutive_failures, last_success_at, last_failure_at, latency_ms, records_received, last_error, metadata, updated_at)
-    VALUES (${provider}, 'open-data', ${configured}, ${authoritative}, ${result.ok ? 'healthy' : 'degraded'}, ${result.ok ? 0 : 1}, ${result.ok ? new Date() : null}, ${result.ok ? null : new Date()}, ${result.latencyMs}, ${result.records}, ${result.error ?? null}, ${JSON.stringify({ shadowOnly: true })}::jsonb, now())
+    VALUES (${provider}, 'open-data', ${configured}, ${authoritative}, ${result.ok ? 'healthy' : 'degraded'}, ${result.ok ? 0 : 1}, ${result.ok ? new Date().toISOString() : null}, ${result.ok ? null : new Date().toISOString()}, ${result.latencyMs}, ${result.records}, ${result.error ?? null}, ${JSON.stringify({ shadowOnly: true })}::jsonb, now())
     ON CONFLICT (provider) DO UPDATE SET configured=EXCLUDED.configured, authoritative=EXCLUDED.authoritative, last_status=EXCLUDED.last_status,
     consecutive_failures=CASE WHEN EXCLUDED.last_status='healthy' THEN 0 ELSE provider_health.consecutive_failures+1 END,
     last_success_at=COALESCE(EXCLUDED.last_success_at, provider_health.last_success_at), last_failure_at=COALESCE(EXCLUDED.last_failure_at, provider_health.last_failure_at),

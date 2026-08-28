@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { bootstrapDeepIntelligence } from '@/lib/db/bootstrap-deep-intelligence';
+import { toJsonb } from '@/lib/db/json';
 
 const n = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
 const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, Math.round(v)));
@@ -26,7 +27,7 @@ export async function runDeepIntelligence() {
     const confidence=clamp((r.verified?55:25)+(float>0?20:0)+(outstanding>0?15:0)+(authorized>0?10:0));
     const riskFactors=[overhang>20?'financing-overhang':null,headroom>100?'authorized-headroom':null,n(r.financing_count)>=3?'repeat-financing':null].filter(Boolean);
     await sql`INSERT INTO structure_intelligence (id,security_id,effective_float,outstanding_shares,authorized_shares,reserved_dilution_shares,dilution_overhang_pct,dilution_risk,float_confidence,risk_factors,evidence,observed_at)
-      VALUES (${id('structure',r.security_id,r.observed_at)},${r.security_id},${effectiveFloat},${outstanding||null},${authorized||null},${reserved||0},${overhang},${risk},${confidence},${sql.json(riskFactors)},${sql.json({source:r.source,verified:r.verified,financingEvents:n(r.financing_count),method:'conservative-structure-v1'})},now()) ON CONFLICT (id) DO NOTHING`;
+      VALUES (${id('structure',r.security_id,r.observed_at)},${r.security_id},${effectiveFloat},${outstanding||null},${authorized||null},${reserved||0},${overhang},${risk},${confidence},${toJsonb(riskFactors)}::jsonb,${toJsonb({source:r.source,verified:r.verified,financingEvents:n(r.financing_count),method:'conservative-structure-v1'})}::jsonb,now()) ON CONFLICT (id) DO NOTHING`;
     structureRows++;
   }
 
@@ -44,7 +45,7 @@ export async function runDeepIntelligence() {
     const total=buyValue+sellValue; const alignment=clamp(50+(total>0?((buyValue-sellValue)/total)*35:0)+(inst>0?10:0));
     const confidence=clamp((total>0?55:15)+(inst>0?25:0));
     await sql`INSERT INTO ownership_intelligence (id,security_id,insider_net_shares,insider_buy_value,insider_sell_value,institutional_shares,ownership_alignment_score,confidence,evidence,observed_at)
-      VALUES (${id('ownership',r.security_id,new Date().toISOString().slice(0,10))},${r.security_id},${buys-sells},${buyValue},${sellValue},${inst},${alignment},${confidence},${sql.json({windowDays:180,method:'ownership-alignment-v1'})},now()) ON CONFLICT (id) DO UPDATE SET insider_net_shares=EXCLUDED.insider_net_shares,insider_buy_value=EXCLUDED.insider_buy_value,insider_sell_value=EXCLUDED.insider_sell_value,institutional_shares=EXCLUDED.institutional_shares,ownership_alignment_score=EXCLUDED.ownership_alignment_score,confidence=EXCLUDED.confidence,evidence=EXCLUDED.evidence,observed_at=now()`;
+      VALUES (${id('ownership',r.security_id,new Date().toISOString().slice(0,10))},${r.security_id},${buys-sells},${buyValue},${sellValue},${inst},${alignment},${confidence},${toJsonb({windowDays:180,method:'ownership-alignment-v1'})}::jsonb,now()) ON CONFLICT (id) DO UPDATE SET insider_net_shares=EXCLUDED.insider_net_shares,insider_buy_value=EXCLUDED.insider_buy_value,insider_sell_value=EXCLUDED.insider_sell_value,institutional_shares=EXCLUDED.institutional_shares,ownership_alignment_score=EXCLUDED.ownership_alignment_score,confidence=EXCLUDED.confidence,evidence=EXCLUDED.evidence,observed_at=now()`;
     ownershipRows++;
   }
 
@@ -55,7 +56,7 @@ export async function runDeepIntelligence() {
     const form=String(r.form||'').toUpperCase();
     const materiality=form==='8-K'?78:/S-1|S-3|424B/.test(form)?85:/10-Q|10-K/.test(form)?65:55;
     const halfLife=/8-K/.test(form)?1440:/S-1|S-3|424B/.test(form)?4320:2880;
-    await sql`INSERT INTO catalyst_intelligence (id,security_id,catalyst_type,materiality,novelty,credibility,half_life_minutes,source_event_id,source,evidence,observed_at) VALUES (${id('catalyst',r.source,r.source_event_id)},${r.security_id},${form},${materiality},65,${r.source==='sec-filing'?95:80},${halfLife},${r.source_event_id},${r.source},${sql.json({method:'catalyst-materiality-v1'})},${r.observed_at}) ON CONFLICT (id) DO NOTHING`;
+    await sql`INSERT INTO catalyst_intelligence (id,security_id,catalyst_type,materiality,novelty,credibility,half_life_minutes,source_event_id,source,evidence,observed_at) VALUES (${id('catalyst',r.source,r.source_event_id)},${r.security_id},${form},${materiality},65,${r.source==='sec-filing'?95:80},${halfLife},${r.source_event_id},${r.source},${toJsonb({method:'catalyst-materiality-v1'})}::jsonb,${r.observed_at}) ON CONFLICT (id) DO NOTHING`;
     catalystRows++;
   }
 
@@ -70,7 +71,7 @@ export async function runDeepIntelligence() {
     const peak=clamp(n(r.peak_risk)*.45+crowding*.3+liquidityDecay*.15+n(r.structural)*.1);
     const base=String(r.state)==='ACCELERATION'?120:String(r.state)==='BREAKOUT'?240:String(r.state)==='EUPHORIA'?45:360;
     const halfLife=Math.max(15,Math.round(base*(1-peak/140)));
-    await sql`INSERT INTO opportunity_dynamics (id,opportunity_id,security_id,half_life_minutes,peak_probability,crowding_score,liquidity_decay_score,structural_risk_score,ownership_alignment_score,evidence,computed_at) VALUES (${id('dynamics',r.opportunity_id)},${r.opportunity_id},${r.security_id},${halfLife},${peak},${crowding},${liquidityDecay},${n(r.structural)},${n(r.ownership)},${sql.json({method:'opportunity-dynamics-v1',capitalExecutionEnabled:false})},now()) ON CONFLICT (opportunity_id) DO UPDATE SET half_life_minutes=EXCLUDED.half_life_minutes,peak_probability=EXCLUDED.peak_probability,crowding_score=EXCLUDED.crowding_score,liquidity_decay_score=EXCLUDED.liquidity_decay_score,structural_risk_score=EXCLUDED.structural_risk_score,ownership_alignment_score=EXCLUDED.ownership_alignment_score,evidence=EXCLUDED.evidence,computed_at=now()`;
+    await sql`INSERT INTO opportunity_dynamics (id,opportunity_id,security_id,half_life_minutes,peak_probability,crowding_score,liquidity_decay_score,structural_risk_score,ownership_alignment_score,evidence,computed_at) VALUES (${id('dynamics',r.opportunity_id)},${r.opportunity_id},${r.security_id},${halfLife},${peak},${crowding},${liquidityDecay},${n(r.structural)},${n(r.ownership)},${toJsonb({method:'opportunity-dynamics-v1',capitalExecutionEnabled:false})}::jsonb,now()) ON CONFLICT (opportunity_id) DO UPDATE SET half_life_minutes=EXCLUDED.half_life_minutes,peak_probability=EXCLUDED.peak_probability,crowding_score=EXCLUDED.crowding_score,liquidity_decay_score=EXCLUDED.liquidity_decay_score,structural_risk_score=EXCLUDED.structural_risk_score,ownership_alignment_score=EXCLUDED.ownership_alignment_score,evidence=EXCLUDED.evidence,computed_at=now()`;
     dynamicsRows++;
   }
   return {ok:true as const,structureRows,ownershipRows,catalystRows,dynamicsRows,shadowOnly:true,capitalExecutionEnabled:false};

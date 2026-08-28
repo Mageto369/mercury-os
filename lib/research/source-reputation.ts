@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db';
+import { toJsonb } from '@/lib/db/json';
 
 export async function refreshSourceReputation() {
   const sql = getSql();
@@ -54,7 +55,7 @@ export async function refreshSourceReputation() {
       ) VALUES (
         ${`source:${row.source_type}:${row.source_ref}`}, ${String(row.source_type)}, ${String(row.source_ref)},
         ${observations}, ${leadRate}, ${lateRate}, ${promotionRate}, ${positive60mRate}, ${medianLeadMinutes}, ${reliability},
-        ${sql.json({ method: 'outcome-linked-v1', shadowOnly: true })}, now()
+        ${toJsonb({ method: 'outcome-linked-v1', shadowOnly: true })}::jsonb, now()
       )
       ON CONFLICT (source_type, source_ref) DO UPDATE SET
         observations = excluded.observations,

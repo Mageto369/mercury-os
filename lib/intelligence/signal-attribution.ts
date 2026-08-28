@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { conditionalExpectancy, correlationDecayMinutes } from '@/lib/intelligence/signal-metrics';
+import { toJsonb } from '@/lib/db/json';
 
 const hid=(...parts:unknown[])=>createHash('sha256').update(parts.join(':')).digest('hex');
 const num=(v:unknown)=>{const n=Number(v);return Number.isFinite(n)?n:0};
@@ -35,7 +36,7 @@ export async function runSignalAttribution(){
     const decayMinutes=correlationDecayMinutes([{minutes:15,correlation:corr15},{minutes:60,correlation:corr60},{minutes:1440,correlation:corr1d}]);
     const status=observations>=50&&expectancy>0&&hit>=55?'candidate':observations>=20?'shadow':'insufficient';
     const result=await sql`INSERT INTO signal_performance(id,signal_key,family,regime,observations,hit_rate,average_return,marginal_expectancy,correlation_to_alpha,decay_minutes,status,metrics,evaluated_at)
-      VALUES(${hid('signal',r.signal_key,r.regime)},${r.signal_key},${r.family},${r.regime},${observations},${hit},${avg},${expectancy},${corr60},${decayMinutes},${status},${sql.json({expectancyMethod:'conditional-win-loss-weighted',averageWin,averageLoss,wins,losses,decayMethod:'predictive-correlation-half-life',horizonCorrelations:{m15:corr15,m60:corr60,d1:corr1d},decayObservedThroughMinutes:1440,conditionalNotCausal:true,evidenceScope:'live',syntheticValidationExcluded:true,capitalExecutionEnabled:false})},now())
+      VALUES(${hid('signal',r.signal_key,r.regime)},${r.signal_key},${r.family},${r.regime},${observations},${hit},${avg},${expectancy},${corr60},${decayMinutes},${status},${toJsonb({expectancyMethod:'conditional-win-loss-weighted',averageWin,averageLoss,wins,losses,decayMethod:'predictive-correlation-half-life',horizonCorrelations:{m15:corr15,m60:corr60,d1:corr1d},decayObservedThroughMinutes:1440,conditionalNotCausal:true,evidenceScope:'live',syntheticValidationExcluded:true,capitalExecutionEnabled:false})}::jsonb,now())
       ON CONFLICT(signal_key,regime) DO UPDATE SET family=EXCLUDED.family,observations=EXCLUDED.observations,hit_rate=EXCLUDED.hit_rate,average_return=EXCLUDED.average_return,marginal_expectancy=EXCLUDED.marginal_expectancy,correlation_to_alpha=EXCLUDED.correlation_to_alpha,decay_minutes=EXCLUDED.decay_minutes,status=EXCLUDED.status,metrics=EXCLUDED.metrics,evaluated_at=now() RETURNING id`;
     persisted+=result.length;
   }

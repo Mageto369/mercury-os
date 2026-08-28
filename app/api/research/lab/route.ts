@@ -9,6 +9,7 @@ import {
   summarizeProvenance,
 } from "@/lib/performance/provenance";
 import { adminAuthorized, sameOriginMutation } from "@/lib/admin/security";
+import { toJsonb } from '@/lib/db/json';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -163,7 +164,7 @@ export async function POST(request: Request) {
       start: parsed.data.testStart ?? null,
       end: parsed.data.testEnd ?? null,
     };
-    await sql`insert into research_experiments(id,engine,model_version,hypothesis,train_window,test_window,parameters,leakage_checks,status,shadow_only) values(${id},${parsed.data.engine},${parsed.data.modelVersion ?? null},${parsed.data.hypothesis},${sql.json(trainWindow)},${sql.json(testWindow)},${sql.json(parsed.data.parameters)},${sql.json({ pointInTimeRequired: true, futureLeakageForbidden: true, transactionCostsRequired: true })},'queued',true)`;
+    await sql`insert into research_experiments(id,engine,model_version,hypothesis,train_window,test_window,parameters,leakage_checks,status,shadow_only) values(${id},${parsed.data.engine},${parsed.data.modelVersion ?? null},${parsed.data.hypothesis},${toJsonb(trainWindow)}::jsonb,${toJsonb(testWindow)}::jsonb,${toJsonb(parsed.data.parameters)}::jsonb,${toJsonb({ pointInTimeRequired: true, futureLeakageForbidden: true, transactionCostsRequired: true })}::jsonb,'queued',true)`;
     return NextResponse.json({
       ok: true,
       id,

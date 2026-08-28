@@ -5,6 +5,7 @@ import { adminAuthorized, sameOriginMutation } from '@/lib/admin/security';
 import { integrationCatalog, ingestionCatalog } from '@/lib/admin/catalog';
 import { encryptSecret, vaultConfigured } from '@/lib/admin/vault';
 import { getSql } from '@/lib/db';
+import { toJsonb } from '@/lib/db/json';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -38,15 +39,15 @@ export async function PUT(request:Request){
   if(body?.type==='integration'){
     const parsed=integrationSchema.safeParse(body.value); if(!parsed.success)return NextResponse.json({ok:false,error:'invalid_integration',issues:parsed.error.issues},{status:400});
     const v=parsed.data; const cat=integrationCatalog.find(x=>x.id===v.id); if(!cat)return NextResponse.json({ok:false,error:'unknown_integration'},{status:404});
-    await sql`insert into integration_configs(id,category,provider,display_name,base_url,model,enabled,capabilities,settings,updated_at) values(${v.id},${cat.category},${cat.provider},${cat.displayName},${v.baseUrl||null},${v.model||null},${v.enabled},${sql.json([...cat.capabilities])},${sql.json(jsonSafe(v.settings))},now()) on conflict(id) do update set base_url=excluded.base_url,model=excluded.model,enabled=excluded.enabled,settings=excluded.settings,updated_at=now()`;
+    await sql`insert into integration_configs(id,category,provider,display_name,base_url,model,enabled,capabilities,settings,updated_at) values(${v.id},${cat.category},${cat.provider},${cat.displayName},${v.baseUrl||null},${v.model||null},${v.enabled},${toJsonb([...cat.capabilities])}::jsonb,${toJsonb(jsonSafe(v.settings))}::jsonb,now()) on conflict(id) do update set base_url=excluded.base_url,model=excluded.model,enabled=excluded.enabled,settings=excluded.settings,updated_at=now()`;
     if(v.secret){ if(!vaultConfigured())return NextResponse.json({ok:false,error:'vault_not_configured'},{status:503}); const enc=encryptSecret(v.secret); await sql`insert into integration_secrets(id,integration_id,secret_name,ciphertext,iv,auth_tag,masked_hint,updated_at) values(${randomUUID()},${v.id},${v.secretName},${enc.ciphertext},${enc.iv},${enc.authTag},${enc.maskedHint},now()) on conflict(integration_id,secret_name) do update set ciphertext=excluded.ciphertext,iv=excluded.iv,auth_tag=excluded.auth_tag,masked_hint=excluded.masked_hint,updated_at=now()`; }
-    await sql`insert into admin_audit_log(id,action,target_type,target_ref,outcome,metadata) values(${randomUUID()},'update','integration',${v.id},'success',${sql.json({enabled:v.enabled,secretRotated:Boolean(v.secret)})})`;
+    await sql`insert into admin_audit_log(id,action,target_type,target_ref,outcome,metadata) values(${randomUUID()},'update','integration',${v.id},'success',${toJsonb({enabled:v.enabled,secretRotated:Boolean(v.secret)})}::jsonb)`;
     return NextResponse.json({ok:true});
   }
   if(body?.type==='ingestion'){
     const parsed=ingestionSchema.safeParse(body.value); if(!parsed.success)return NextResponse.json({ok:false,error:'invalid_ingestion',issues:parsed.error.issues},{status:400}); const v=parsed.data; const cat=ingestionCatalog.find(x=>x.key===v.pipelineKey); if(!cat)return NextResponse.json({ok:false,error:'unknown_pipeline'},{status:404});
-    await sql`insert into ingestion_settings(id,pipeline_key,display_name,enabled,cadence_minutes,batch_size,source_priority,settings,updated_at) values(${v.pipelineKey},${v.pipelineKey},${cat.displayName},${v.enabled},${v.cadenceMinutes},${v.batchSize},${sql.json(v.sourcePriority)},${sql.json(jsonSafe(v.settings))},now()) on conflict(pipeline_key) do update set enabled=excluded.enabled,cadence_minutes=excluded.cadence_minutes,batch_size=excluded.batch_size,source_priority=excluded.source_priority,settings=excluded.settings,updated_at=now()`;
-    await sql`insert into admin_audit_log(id,action,target_type,target_ref,outcome,metadata) values(${randomUUID()},'update','ingestion',${v.pipelineKey},'success',${sql.json({enabled:v.enabled,cadenceMinutes:v.cadenceMinutes,batchSize:v.batchSize})})`;
+    await sql`insert into ingestion_settings(id,pipeline_key,display_name,enabled,cadence_minutes,batch_size,source_priority,settings,updated_at) values(${v.pipelineKey},${v.pipelineKey},${cat.displayName},${v.enabled},${v.cadenceMinutes},${v.batchSize},${toJsonb(v.sourcePriority)}::jsonb,${toJsonb(jsonSafe(v.settings))}::jsonb,now()) on conflict(pipeline_key) do update set enabled=excluded.enabled,cadence_minutes=excluded.cadence_minutes,batch_size=excluded.batch_size,source_priority=excluded.source_priority,settings=excluded.settings,updated_at=now()`;
+    await sql`insert into admin_audit_log(id,action,target_type,target_ref,outcome,metadata) values(${randomUUID()},'update','ingestion',${v.pipelineKey},'success',${toJsonb({enabled:v.enabled,cadenceMinutes:v.cadenceMinutes,batchSize:v.batchSize})}::jsonb)`;
     return NextResponse.json({ok:true});
   }
   return NextResponse.json({ok:false,error:'invalid_request'},{status:400});

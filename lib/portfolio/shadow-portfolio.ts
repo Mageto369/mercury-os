@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { simulateExecution } from '@/lib/execution/simulator';
+import { toJsonb } from '@/lib/db/json';
 
 export async function buildShadowPortfolio() {
   const sql = getSql();
@@ -82,7 +83,7 @@ export async function buildShadowPortfolio() {
       concentration_score, regime, positions, limits, observed_at
     ) VALUES (
       ${id}, ${grossExposure}, ${grossExposure}, ${null}, ${0}, ${liquidityAtRisk}, ${concentration},
-      'research-shadow', ${sql.json(positions as any)}, ${sql.json(limits)}, now()
+      'research-shadow', ${toJsonb(positions as any)}::jsonb, ${toJsonb(limits)}::jsonb, now()
     )
   `;
 

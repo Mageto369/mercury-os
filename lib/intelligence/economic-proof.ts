@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { countSurvivors, summarizeProvenance } from '@/lib/performance/provenance';
+import { toJsonb } from '@/lib/db/json';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 
@@ -78,7 +79,7 @@ export async function evaluateEconomicProof() {
     values (
       ${hash(`proof:${new Date().toISOString().slice(0, 10)}`)}, 'alpha-factory-v2', 'live',
       ${n}, 1, ${average}, ${drawdown}, ${exTopWinners}, ${provenance.syntheticSurviving},
-      ${passed}, ${sql.json(reasons)}, now()
+      ${passed}, ${toJsonb(reasons)}::jsonb, now()
     )
     on conflict (id) do update set
       sample_size = excluded.sample_size,

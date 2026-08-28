@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
+import { toJsonb } from '@/lib/db/json';
 
 const hid=(...parts:unknown[])=>createHash('sha256').update(parts.join(':')).digest('hex');
 const clamp=(n:number)=>Math.max(0,Math.min(100,Math.round(n)));
@@ -19,19 +20,19 @@ export async function buildEntityRelationshipGraph(){
     const repeat=await sql<any[]>`SELECT count(DISTINCT security_id)::int c FROM insider_transactions WHERE lower(trim(owner_name))=${ref}`;
     const cross=Number(repeat[0]?.c??1);
     const risk=clamp((cross-1)*12+(String(r.transaction_code).toUpperCase()==='S'?8:0));
-    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('insider',r.security_id,ref,r.owner_role,r.transaction_code)},${r.security_id},'person',${r.owner_name},${`insider:${r.owner_role??'unknown'}:${r.transaction_code??'unknown'}`},'security',${r.security_id},${risk},85,'sec-form4',${sql.json({observations:r.observations,crossIssuerCount:cross})},now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
+    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('insider',r.security_id,ref,r.owner_role,r.transaction_code)},${r.security_id},'person',${r.owner_name},${`insider:${r.owner_role??'unknown'}:${r.transaction_code??'unknown'}`},'security',${r.security_id},${risk},85,'sec-form4',${toJsonb({observations:r.observations,crossIssuerCount:cross})}::jsonb,now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
     inserted+=res.length;
   }
   for(const r of institutions){
     const ref=norm(r.manager_cik||r.manager_name); if(!ref)continue;
     const repeat=await sql<any[]>`SELECT count(DISTINCT security_id)::int c FROM institutional_holdings WHERE lower(trim(coalesce(manager_cik,manager_name)))=${ref}`;
     const cross=Number(repeat[0]?.c??1),risk=clamp((cross-3)*4);
-    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('institution',r.security_id,ref)},${r.security_id},'institution',${r.manager_name||r.manager_cik},'institutional-holder','security',${r.security_id},${risk},75,'sec-13f',${sql.json({observations:r.observations,crossIssuerCount:cross,managerCik:r.manager_cik})},now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
+    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('institution',r.security_id,ref)},${r.security_id},'institution',${r.manager_name||r.manager_cik},'institutional-holder','security',${r.security_id},${risk},75,'sec-13f',${toJsonb({observations:r.observations,crossIssuerCount:cross,managerCik:r.manager_cik})}::jsonb,now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
     inserted+=res.length;
   }
   for(const r of financings){
     const ref=`${r.event_type}:${r.form??'unknown'}`;
-    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('financing',r.security_id,ref)},${r.security_id},'financing-pattern',${ref},'financing-history','security',${r.security_id},${clamp(Number(r.observations)*10)},80,'sec-edgar',${sql.json({observations:r.observations,eventType:r.event_type,form:r.form})},now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
+    const res=await sql`INSERT INTO entity_relationships(id,security_id,entity_type,entity_ref,relationship_type,related_entity_type,related_entity_ref,risk_score,confidence,source,evidence,observed_at) VALUES(${hid('financing',r.security_id,ref)},${r.security_id},'financing-pattern',${ref},'financing-history','security',${r.security_id},${clamp(Number(r.observations)*10)},80,'sec-edgar',${toJsonb({observations:r.observations,eventType:r.event_type,form:r.form})}::jsonb,now()) ON CONFLICT(id) DO NOTHING RETURNING id`;
     inserted+=res.length;
   }
 

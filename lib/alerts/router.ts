@@ -244,13 +244,16 @@ export async function routeOperationalAlert(input: {
           ${randomUUID()}, ${event.eventKey ?? null}, ${event.severity}, ${outcome.channel},
           ${outcome.destination}, ${outcome.status}, true,
           ${outcome.status === 'delivered' || outcome.status === 'failed' ? 1 : 0},
-          ${sql.json({ ...basePayload, ruleKey: outcome.ruleKey, ruleName: outcome.ruleName, reason: outcome.reason })},
-          ${outcome.error}, ${outcome.status === 'delivered' ? new Date() : null}
+          ${JSON.stringify({ ...basePayload, ruleKey: outcome.ruleKey, ruleName: outcome.ruleName, reason: outcome.reason })}::jsonb,
+          ${outcome.error}, ${outcome.status === 'delivered' ? new Date().toISOString() : null}
         )
       `;
     }
     persisted = true;
-  } catch { persisted = false; }
+  } catch (cause) {
+    persisted = false;
+    console.error('alert_delivery_persist_failed', cause instanceof Error ? cause.message : cause);
+  }
 
   return {
     routed: outcomes.some((o) => o.status === 'delivered'),

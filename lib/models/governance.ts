@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db';
+import { toJsonb } from '@/lib/db/json';
 
 export async function getModelGovernance() {
   const sql = getSql();
@@ -50,9 +51,9 @@ export async function ensureBaselineModel() {
     ) VALUES (
       ${`model:mercury-opportunity:${version}`}, 'mercury-opportunity', ${version}, 'champion', 'shadow',
       'microcap-opportunity', 'all',
-      ${sql.json({ families: ['catalyst','liquidity','attention','structure','dilution','regime','distribution'], shadowOnly: true })},
-      ${sql.json({ status: 'collecting-evidence' })},
-      ${sql.json({ requiresOutOfSampleEvidence: true, brokerAuthority: false })}, now()
+      ${toJsonb({ families: ['catalyst','liquidity','attention','structure','dilution','regime','distribution'], shadowOnly: true })}::jsonb,
+      ${toJsonb({ status: 'collecting-evidence' })}::jsonb,
+      ${toJsonb({ requiresOutOfSampleEvidence: true, brokerAuthority: false })}::jsonb, now()
     )
     ON CONFLICT (model_key, version) DO NOTHING
   `;

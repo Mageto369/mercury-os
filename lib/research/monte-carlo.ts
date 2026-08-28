@@ -1,6 +1,14 @@
 export const MONTE_CARLO_MINIMUM_OBSERVATIONS = 100;
 export const ECONOMIC_PROOF_SAMPLE_FLOOR = 1_000;
 
+/** Per-trade equity floor. Truncates losses beyond -99% so a path cannot go negative. */
+const EQUITY_FLOOR = 0.01;
+/**
+ * "Ruin" here is a terminal drawdown of this depth, not a zero balance. Naming
+ * it a ruin probability without saying so overstates what is being measured.
+ */
+export const RUIN_THRESHOLD_PCT = 50;
+
 export interface MonteCarloOptions {
   simulations?: number;
   tradesPerPath?: number;
@@ -65,13 +73,13 @@ export function runBootstrapMonteCarlo(
         Math.floor(random() * sourceObservations),
       );
       const sampledReturn = observations[index] / 100;
-      equity *= Math.max(0.01, 1 + sampledReturn);
+      equity *= Math.max(EQUITY_FLOOR, 1 + sampledReturn);
       peak = Math.max(peak, equity);
       maxDrawdown = Math.min(maxDrawdown, (equity - peak) / peak);
     }
     paths.push(equity - 1);
     drawdowns.push(maxDrawdown);
-    if (equity <= 0.5) ruin += 1;
+    if (equity <= 1 - RUIN_THRESHOLD_PCT / 100) ruin += 1;
   }
 
   paths.sort((left, right) => left - right);
@@ -107,8 +115,12 @@ export function runBootstrapMonteCarlo(
     medianMaxDrawdownPct: quantile(drawdowns, 0.5) * 100,
     p05MaxDrawdownPct: quantile(drawdowns, 0.05) * 100,
     ruinProbabilityPct: (ruin / simulations) * 100,
+    ruinThresholdPct: RUIN_THRESHOLD_PCT,
+    ruinDefinition: `Share of simulated paths ending at or below a ${RUIN_THRESHOLD_PCT}% drawdown from starting equity. This is not a probability of total loss.`,
+    equityFloorApplied: true,
     limitations: [
-      "Bootstrap paths assume observed returns are representative and resample observations independently.",
+      "Bootstrap paths assume observed returns are representative and resample observations independently, so serial dependence and volatility clustering are not modelled.",
+      `Per-trade equity is floored at ${EQUITY_FLOOR}, which truncates losses beyond -99% and biases paths optimistically.`,
       sourceObservations < ECONOMIC_PROOF_SAMPLE_FLOOR
         ? `The ${ECONOMIC_PROOF_SAMPLE_FLOOR}-observation economic-proof sample floor has not been met.`
         : "Meeting the sample floor does not satisfy the remaining economic-proof gates.",

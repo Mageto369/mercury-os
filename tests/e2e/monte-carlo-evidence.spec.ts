@@ -60,3 +60,29 @@ test("meeting the economic-proof sample floor does not grant capital authority",
   expect(result.evidenceStatus).toBe("strong");
   expect(result.capitalExecutionEnabled).toBe(false);
 });
+
+test("the ruin figure is labelled as a drawdown threshold, not total loss", () => {
+  const returns = Array.from({ length: MONTE_CARLO_MINIMUM_OBSERVATIONS }, () => 1);
+  const result = runBootstrapMonteCarlo(returns, {
+    simulations: 100,
+    tradesPerPath: 10,
+    random: () => 0,
+  });
+  expect(result.available).toBe(true);
+  if (!result.available) return;
+  expect(result.ruinThresholdPct).toBe(50);
+  expect(result.ruinDefinition).toContain("not a probability of total loss");
+});
+
+test("the optimistic equity floor is disclosed as a limitation", () => {
+  const returns = Array.from({ length: MONTE_CARLO_MINIMUM_OBSERVATIONS }, () => 1);
+  const result = runBootstrapMonteCarlo(returns, {
+    simulations: 100,
+    tradesPerPath: 10,
+    random: () => 0,
+  });
+  expect(result.available).toBe(true);
+  if (!result.available) return;
+  expect(result.equityFloorApplied).toBe(true);
+  expect(result.limitations.join(" ")).toContain("biases paths optimistically");
+});

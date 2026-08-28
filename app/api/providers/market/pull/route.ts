@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { pullAndPersistMarketData } from '@/lib/providers/market/router';
 
 export const runtime = 'nodejs';

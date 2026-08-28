@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { backfillHistoricalMarket, getHistoricalBackfillStatus } from '@/lib/research/historical-backfill';
 import { computeSetupFingerprints } from '@/lib/research/setup-fingerprints';
 

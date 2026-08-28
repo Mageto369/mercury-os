@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { bootstrapDatabase } from '@/lib/db/bootstrap';
 import { bootstrapIntelligenceLab } from '@/lib/db/bootstrap-intelligence-lab';
 

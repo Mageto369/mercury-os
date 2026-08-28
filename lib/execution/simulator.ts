@@ -19,6 +19,18 @@ export interface ExecutionSimulationResult {
   discontinuityRisk: 'low' | 'moderate' | 'high' | 'extreme';
 }
 
+export function clampSimulatedFillPrice(
+  orderType: 'market' | 'limit',
+  side: 'buy' | 'sell',
+  slippedPrice: number,
+  requestedPrice: number,
+) {
+  if (orderType !== 'limit') return slippedPrice;
+  return side === 'buy'
+    ? Math.min(slippedPrice, requestedPrice)
+    : Math.max(slippedPrice, requestedPrice);
+}
+
 export function simulateExecution(input: ExecutionSimulationInput): ExecutionSimulationResult {
   const notional = Math.max(0, input.notional);
   const dollarVolume = Math.max(1, input.dollarVolume);

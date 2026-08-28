@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { getSourceReputation, refreshSourceReputation } from '@/lib/research/source-reputation';
 
 export const runtime = 'nodejs';

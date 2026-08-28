@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { getOpenIntelligenceStatus, runOpenIntelligenceSync } from '@/lib/integrations/open-intelligence-sync';
 
 export const runtime='nodejs';

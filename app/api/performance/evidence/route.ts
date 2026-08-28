@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { getOutcomeEvidence, matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 
 export const runtime = 'nodejs';

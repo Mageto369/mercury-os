@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
+import { NextResponse } from 'next/server';
+import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { getResearchProofStatus, runResearchProofCycle } from '@/lib/integrations/research-proof';
 
 export const runtime = 'nodejs';

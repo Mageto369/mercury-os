@@ -4,19 +4,29 @@
 -- makes an impossible limit fill unrepresentable in the first place.
 do $$
 begin
-  if not exists (
+  if exists (
     select 1 from pg_constraint
     where conname = 'paper_orders_limit_price_respected'
       and conrelid = 'public.paper_orders'::regclass
   ) then
     alter table public.paper_orders
-      add constraint paper_orders_limit_price_respected check (
-        order_type <> 'limit'
-        or average_fill_price is null
-        or requested_price is null
-        or (side = 'buy' and average_fill_price <= requested_price)
-        or (side = 'sell' and average_fill_price >= requested_price)
-      );
+      drop constraint paper_orders_limit_price_respected;
   end if;
+
+  alter table public.paper_orders
+    add constraint paper_orders_limit_price_respected check (
+      order_type <> 'limit'
+      or (
+        requested_price is not null
+        and (
+          average_fill_price is null
+          or (side = 'buy' and average_fill_price <= requested_price)
+          or (side = 'sell' and average_fill_price >= requested_price)
+        )
+      )
+    ) not valid;
+
+  alter table public.paper_orders
+    validate constraint paper_orders_limit_price_respected;
 end
 $$;

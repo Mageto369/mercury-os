@@ -4,6 +4,10 @@ import { z } from "zod";
 import { getSql } from "@/lib/db";
 import { getHistoricalTwins } from "@/lib/research/historical-twins";
 import { runBootstrapMonteCarlo } from "@/lib/research/monte-carlo";
+import {
+  countSurvivors,
+  summarizeProvenance,
+} from "@/lib/performance/provenance";
 import { adminAuthorized, sameOriginMutation } from "@/lib/admin/security";
 
 export const runtime = "nodejs";
@@ -48,8 +52,20 @@ export async function GET(request: Request) {
       await sql`select id,scope,model_version,as_of,expectancy,sharpe,sortino,calmar,max_drawdown,expected_shortfall,profit_factor,win_rate,monte_carlo_ruin_probability,metrics,source_engine,shadow_only from proof_metrics order by as_of desc limit 100`;
     const gates =
       await sql`select id,model_version,evidence_scope,sample_size,regimes,net_expectancy,max_drawdown,rolling_stability,capacity_score,stress_survival,ex_top_winners_expectancy,synthetic_rows,passed,reasons,evaluated_at from economic_proof_gates where evidence_scope='live' order by evaluated_at desc limit 50`;
+    // Pre-filter census, counted without the provenance predicate so the audit
+    // can demonstrate that filtering removed something rather than restating
+    // the predicate back to itself.
+    const [provenanceCensus] =
+      await sql`select count(*)::int candidate_rows,count(*) filter(where s.id like 'validation:%')::int synthetic_candidates from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null`;
     const returnsRows =
-      await sql`select oo.return_60m from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' order by oo.evaluated_at desc limit 5000`;
+      await sql`select oo.return_60m,oo.security_id from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' order by oo.evaluated_at desc limit 5000`;
+    const survivors = countSurvivors(returnsRows);
+    const evidenceProvenance = summarizeProvenance("live", {
+      candidateRows: Number(provenanceCensus?.candidate_rows ?? 0),
+      syntheticCandidates: Number(provenanceCensus?.synthetic_candidates ?? 0),
+      syntheticSurviving: survivors.syntheticSurviving,
+      liveSurviving: survivors.liveSurviving,
+    });
     const returns = returnsRows
       .map((r) => Number(r.return_60m))
       .filter(Number.isFinite);
@@ -90,6 +106,7 @@ export async function GET(request: Request) {
       proofMetrics: proof,
       economicProofGates: gates,
       monteCarlo: monteCarloResult,
+      evidenceProvenance,
       historicalTwins: twins,
       evidenceLadder: ladder,
       capitalExecutionEnabled: false,

@@ -10,6 +10,7 @@ type Lab = {
   proofMetrics?: any[];
   economicProofGates?: any[];
   monteCarlo?: any;
+  evidenceProvenance?: any;
   historicalTwins?: any;
   evidenceLadder?: Array<{ stage: string; status: string }>;
   error?: string;
@@ -145,6 +146,65 @@ export function ResearchProofLab() {
               ]}
             />
           </section>
+          {data?.evidenceProvenance && (
+            <section className="surface admin-section">
+              <div className="section-head">
+                <div>
+                  <h2>Evidence Provenance</h2>
+                  <p>
+                    Measured before and after the synthetic/validation filter,
+                    so a clean result is distinguishable from a filter that
+                    never ran.
+                  </p>
+                </div>
+                <span
+                  className={`badge ${!data.evidenceProvenance.provenanceSafe ? "danger" : data.evidenceProvenance.vacuous ? "warn" : "good"}`}
+                >
+                  {!data.evidenceProvenance.provenanceSafe
+                    ? "CONTAMINATED"
+                    : data.evidenceProvenance.vacuous
+                      ? "UNPROVEN"
+                      : "FILTERED"}
+                </span>
+              </div>
+              <div className="paper-facts paper-metrics">
+                <Metric
+                  k="Candidate rows"
+                  v={data.evidenceProvenance.candidateRows}
+                />
+                <Metric
+                  k="Synthetic present"
+                  v={data.evidenceProvenance.syntheticCandidates}
+                />
+                <Metric
+                  k="Synthetic excluded"
+                  v={data.evidenceProvenance.syntheticExcluded}
+                />
+                <Metric
+                  k="Live surviving"
+                  v={data.evidenceProvenance.liveSurviving}
+                />
+                <Metric
+                  k="Synthetic surviving"
+                  v={data.evidenceProvenance.syntheticSurviving}
+                />
+                <Metric
+                  k="Filtering observed"
+                  v={data.evidenceProvenance.filteringObserved ? "YES" : "NO"}
+                />
+              </div>
+              {(data.evidenceProvenance.contaminationReasons ?? []).map(
+                (reason: string) => (
+                  <p
+                    key={reason}
+                    className={`mc-warning ${data.evidenceProvenance.provenanceSafe ? "warn" : "danger"}`}
+                  >
+                    {reason}
+                  </p>
+                ),
+              )}
+            </section>
+          )}
           <section className="surface admin-section">
             <h2>Proof Metrics</h2>
             <DataTable

@@ -41,20 +41,14 @@ export async function POST(request: Request) {
       const mark = Number(snapshot.price);
       const sidePrice = input.side === 'buy' ? Number(snapshot.ask ?? snapshot.price) : Number(snapshot.bid ?? snapshot.price);
       const referencePrice = Number.isFinite(sidePrice) && sidePrice > 0 ? sidePrice : mark;
+      const requestedPrice = input.orderType === 'limit' ? Number(input.limitPrice) : referencePrice;
       if (input.orderType === 'limit') {
-        const crosses = input.side === 'buy' ? Number(input.limitPrice) >= referencePrice : Number(input.limitPrice) <= referencePrice;
+        const crosses = input.side === 'buy' ? requestedPrice >= referencePrice : requestedPrice <= referencePrice;
         if (!crosses) return { status:409, body:{ ok:false, error:'limit_not_marketable', referencePrice } };
       }
 
       const notional = input.quantity * referencePrice;
-      const simulation = simulateExecution({
-        notional,
-        price: referencePrice,
-        dollarVolume: Number(snapshot.dollar_volume ?? 0),
-        spreadBps: Number(snapshot.spread_bps ?? 0),
-        rvol: Number(snapshot.rvol ?? 1),
-        floatRotation: Number(snapshot.float_rotation ?? 0),
-      });
+      const simulation = simulateExecution({ notional, price:referencePrice, dollarVolume:Number(snapshot.dollar_volume ?? 0), spreadBps:Number(snapshot.spread_bps ?? 0), rvol:Number(snapshot.rvol ?? 1), floatRotation:Number(snapshot.float_rotation ?? 0) });
       const slip = simulation.estimatedOneWayCostBps / 10_000;
       const fillPrice = input.side === 'buy' ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
       const orderId = `paper:${randomUUID()}`;
@@ -70,7 +64,7 @@ export async function POST(request: Request) {
       if (input.side === 'sell' && currentQty < input.quantity) rejectReason = 'insufficient_virtual_position';
 
       if (rejectReason) {
-        await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,slippage_bps,reject_reason,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},0,${input.orderType==='limit'?input.limitPrice:referencePrice},null,'rejected',${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,orderType:input.orderType,referencePrice,capitalExecutionEnabled:false})},false)`;
+        await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,slippage_bps,reject_reason,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},0,${requestedPrice},null,'rejected',${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,orderType:input.orderType,referencePrice,capitalExecutionEnabled:false})},false)`;
         return { status:409, body:{ ok:false, error:rejectReason, orderId, simulation, capitalExecutionEnabled:false } };
       }
 
@@ -87,7 +81,7 @@ export async function POST(request: Request) {
         await tx`update paper_accounts set cash=cash+${proceeds},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       }
 
-      await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,latency_ms,slippage_bps,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},${input.quantity},${input.orderType==='limit'?input.limitPrice:referencePrice},${fillPrice},'filled',0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,orderType:input.orderType,referencePrice,fillPrice,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
+      await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,latency_ms,slippage_bps,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,orderType:input.orderType,referencePrice,fillPrice,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
       return { status:200, body:{ ok:true, orderId, symbol:security.symbol, side:input.side, quantity:input.quantity, fillPrice, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
     });
     return NextResponse.json(result.body, { status:result.status });

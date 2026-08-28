@@ -1,3 +1,4 @@
+import { resolveIntegrationSecret } from '@/lib/admin/vault';
 import type { MarketProvider, MarketProviderPullResult, NormalizedMarketSnapshot } from '@/lib/providers/market/types';
 
 type MassiveSnapshotResponse = {
@@ -48,10 +49,10 @@ function normalize(symbol: string, data: MassiveSnapshotResponse): NormalizedMar
 
 export const massiveMarketProvider: MarketProvider = {
   name: 'massive',
-  configured: () => Boolean(process.env.MASSIVE_API_KEY ?? process.env.MARKET_DATA_API_KEY),
+  configured: () => Boolean(process.env.MASSIVE_API_KEY ?? process.env.MARKET_DATA_API_KEY ?? process.env.MERCURY_VAULT_KEY),
   async pull(symbols): Promise<MarketProviderPullResult> {
     const startedAt = new Date();
-    const key = process.env.MASSIVE_API_KEY ?? process.env.MARKET_DATA_API_KEY;
+    const key = await resolveIntegrationSecret('massive', ['MASSIVE_API_KEY', 'MARKET_DATA_API_KEY']);
     if (!key) return { provider: 'massive', ok: false, snapshots: [], requested: symbols.length, received: 0, errors: [{ message: 'massive_api_key_not_configured' }], startedAt: startedAt.toISOString(), completedAt: new Date().toISOString() };
 
     const snapshots: NormalizedMarketSnapshot[] = [];
@@ -64,7 +65,7 @@ export const massiveMarketProvider: MarketProvider = {
         try {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 8_000);
-          const response = await fetch(`https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}?apiKey=${encodeURIComponent(key)}`, { cache: 'no-store', signal: controller.signal });
+          const response = await fetch(`https://api.massive.com/v2/snapshot/locale/us/markets/stocks/tickers/${encodeURIComponent(symbol)}?apiKey=${encodeURIComponent(key)}`, { cache: 'no-store', signal: controller.signal, redirect: 'error' });
           clearTimeout(timeout);
           if (!response.ok) throw new Error(`http_${response.status}`);
           const data = await response.json() as MassiveSnapshotResponse;

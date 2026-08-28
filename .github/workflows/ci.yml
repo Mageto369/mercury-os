@@ -31,9 +31,10 @@ jobs:
           cache-dependency-path: services/open-intelligence/requirements.txt
       - run: pip install -r services/open-intelligence/requirements.txt
       - run: pip check
-      - run: python -m py_compile services/open-intelligence/app/main.py services/open-intelligence/smoke_test.py
+      - run: python -m py_compile services/open-intelligence/app/main.py services/open-intelligence/smoke_test.py services/open-intelligence/stress_test.py
       - run: cd services/open-intelligence && python -c "from app.main import app; assert app.title == 'Mercury Open Intelligence Sidecar'"
       - run: cd services/open-intelligence && python smoke_test.py
+      - run: cd services/open-intelligence && python stress_test.py
 
   research-proof-sidecar:
     runs-on: ubuntu-latest

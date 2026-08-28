@@ -60,7 +60,21 @@ export async function getPaperAccountSnapshot() {
     marketValue += value;
     costBasis += basis;
     unrealizedPnl += unrealized;
-    return { ...position, quantity, averageCost, markPrice, marketValue: value, costBasis: basis, unrealizedPnl: unrealized };
+    return {
+      id: String(position.id),
+      securityId: String(position.security_id),
+      security_id: String(position.security_id),
+      symbol: String(position.symbol),
+      market: String(position.market ?? ''),
+      quantity,
+      averageCost,
+      markPrice,
+      marketValue: value,
+      costBasis: basis,
+      unrealizedPnl: unrealized,
+      realizedPnl: Number(position.realized_pnl ?? 0),
+      markedAt: position.marked_at ?? null,
+    };
   });
 
   const startingCapital = Number(account.starting_capital ?? 0);

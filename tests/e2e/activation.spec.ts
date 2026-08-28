@@ -56,8 +56,8 @@ test('production readiness, performance, and promotion gates are visible and fai
   expect(promotionJson.mode).toBe('shadow');
   expect(promotionJson.capitalExecutionEnabled).toBe(false);
   expect(promotionJson.qualifiedForPaperReview).toBe(false);
-  expect(promotionJson.totalRules).toBe(5);
-  expect(promotionJson.passedRules).toBeLessThan(5);
+  expect(promotionJson.totalRules).toBe(6);
+  expect(promotionJson.passedRules).toBeLessThan(6);
 });
 
 test('validation universe seeding is protected and requires Postgres', async ({ request }) => {

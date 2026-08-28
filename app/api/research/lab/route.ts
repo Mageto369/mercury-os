@@ -1,15 +1,169 @@
-import { randomUUID } from 'node:crypto';
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { getSql } from '@/lib/db';
-import { getHistoricalTwins } from '@/lib/research/historical-twins';
-import { adminAuthorized, sameOriginMutation } from '@/lib/admin/security';
+import { randomUUID } from "node:crypto";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getSql } from "@/lib/db";
+import { getHistoricalTwins } from "@/lib/research/historical-twins";
+import { runBootstrapMonteCarlo } from "@/lib/research/monte-carlo";
+import { adminAuthorized, sameOriginMutation } from "@/lib/admin/security";
 
-export const runtime='nodejs';export const dynamic='force-dynamic';
-const ExperimentSchema=z.object({engine:z.enum(['internal','vectorbt','backtrader']).default('internal'),hypothesis:z.string().trim().min(8).max(3000),modelVersion:z.string().max(200).optional(),parameters:z.record(z.string(),z.union([z.string(),z.number(),z.boolean(),z.null()])).default({}),trainStart:z.string().optional(),trainEnd:z.string().optional(),testStart:z.string().optional(),testEnd:z.string().optional()});
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+const ExperimentSchema = z.object({
+  engine: z.enum(["internal", "vectorbt", "backtrader"]).default("internal"),
+  hypothesis: z.string().trim().min(8).max(3000),
+  modelVersion: z.string().max(200).optional(),
+  parameters: z
+    .record(
+      z.string(),
+      z.union([z.string(), z.number(), z.boolean(), z.null()]),
+    )
+    .default({}),
+  trainStart: z.string().optional(),
+  trainEnd: z.string().optional(),
+  testStart: z.string().optional(),
+  testEnd: z.string().optional(),
+});
 
-function monteCarlo(returns:number[],simulations=2000,tradesPerPath=100){if(!returns.length)return{available:false,reason:'no_matured_live_returns',simulations:0};const paths:number[]=[];const drawdowns:number[]=[];let ruin=0;for(let s=0;s<simulations;s++){let equity=1,peak=1,maxDd=0;for(let i=0;i<tradesPerPath;i++){const r=returns[Math.floor(Math.random()*returns.length)]/100;equity*=Math.max(.01,1+r);peak=Math.max(peak,equity);maxDd=Math.min(maxDd,(equity-peak)/peak)}paths.push(equity-1);drawdowns.push(maxDd);if(equity<=.5)ruin++}paths.sort((a,b)=>a-b);drawdowns.sort((a,b)=>a-b);const q=(a:number[],p:number)=>a[Math.min(a.length-1,Math.max(0,Math.floor((a.length-1)*p)))]??0;return{available:true,method:'bootstrap_with_replacement',sourceObservations:returns.length,simulations,tradesPerPath,medianReturnPct:q(paths,.5)*100,p05ReturnPct:q(paths,.05)*100,p95ReturnPct:q(paths,.95)*100,medianMaxDrawdownPct:q(drawdowns,.5)*100,p05MaxDrawdownPct:q(drawdowns,.05)*100,ruinProbabilityPct:ruin/simulations*100,capitalExecutionEnabled:false}}
+export async function GET(request: Request) {
+  const sql = getSql();
+  if (!sql)
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "database_not_configured",
+        capitalExecutionEnabled: false,
+      },
+      { status: 503 },
+    );
+  const url = new URL(request.url);
+  const opportunityId = url.searchParams.get("opportunityId");
+  try {
+    const replayRuns =
+      await sql`select id,model_version,status,lookback_days,opportunities_reviewed,decisions_reviewed,drift_detected,metrics,started_at,completed_at from replay_runs order by started_at desc limit 100`;
+    const experiments =
+      await sql`select id,engine,model_version,hypothesis,dataset_hash,train_window,test_window,parameters,metrics,leakage_checks,status,shadow_only,started_at,completed_at from research_experiments order by started_at desc limit 100`;
+    const evidence =
+      await sql`select id,experiment_id,model_version,regime,dataset_hash,point_in_time,walk_forward,leakage_passed,transaction_costs_included,metrics,created_at from replay_evidence order by created_at desc limit 100`;
+    const proof =
+      await sql`select id,scope,model_version,as_of,expectancy,sharpe,sortino,calmar,max_drawdown,expected_shortfall,profit_factor,win_rate,monte_carlo_ruin_probability,metrics,source_engine,shadow_only from proof_metrics order by as_of desc limit 100`;
+    const gates =
+      await sql`select id,model_version,evidence_scope,sample_size,regimes,net_expectancy,max_drawdown,rolling_stability,capacity_score,stress_survival,ex_top_winners_expectancy,synthetic_rows,passed,reasons,evaluated_at from economic_proof_gates where evidence_scope='live' order by evaluated_at desc limit 50`;
+    const returnsRows =
+      await sql`select oo.return_60m from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' order by oo.evaluated_at desc limit 5000`;
+    const returns = returnsRows
+      .map((r) => Number(r.return_60m))
+      .filter(Number.isFinite);
+    const monteCarloResult = runBootstrapMonteCarlo(returns);
+    const twins = opportunityId
+      ? await getHistoricalTwins(opportunityId, 30)
+      : null;
+    const latestGate = gates[0] ?? null;
+    const ladder = [
+      { stage: "DISCOVERED", status: "available" },
+      { stage: "OBSERVED", status: returns.length ? "evidence" : "waiting" },
+      {
+        stage: "CONFIRMED",
+        status:
+          Number(latestGate?.sample_size ?? 0) >= 100 ? "evidence" : "waiting",
+      },
+      {
+        stage: "QUALIFIED",
+        status:
+          Number(latestGate?.sample_size ?? 0) >= 500 ? "evidence" : "waiting",
+      },
+      { stage: "SHADOW", status: "active" },
+      { stage: "PROVEN", status: latestGate?.passed ? "passed" : "locked" },
+      {
+        stage: "PAPER",
+        status: latestGate?.passed ? "eligible" : "active_manual",
+      },
+      { stage: "LIMITED CAPITAL", status: "locked" },
+      { stage: "SCALED", status: "locked" },
+    ];
+    return NextResponse.json({
+      ok: true,
+      mode: "research-shadow",
+      evidenceScope: "live-only",
+      replayRuns,
+      experiments,
+      replayEvidence: evidence,
+      proofMetrics: proof,
+      economicProofGates: gates,
+      monteCarlo: monteCarloResult,
+      historicalTwins: twins,
+      evidenceLadder: ladder,
+      capitalExecutionEnabled: false,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "research_lab_failed",
+        detail: error instanceof Error ? error.message : "unknown_error",
+        capitalExecutionEnabled: false,
+      },
+      { status: 500 },
+    );
+  }
+}
 
-export async function GET(request:Request){const sql=getSql();if(!sql)return NextResponse.json({ok:false,error:'database_not_configured',capitalExecutionEnabled:false},{status:503});const url=new URL(request.url);const opportunityId=url.searchParams.get('opportunityId');try{const replayRuns=await sql`select id,model_version,status,lookback_days,opportunities_reviewed,decisions_reviewed,drift_detected,metrics,started_at,completed_at from replay_runs order by started_at desc limit 100`;const experiments=await sql`select id,engine,model_version,hypothesis,dataset_hash,train_window,test_window,parameters,metrics,leakage_checks,status,shadow_only,started_at,completed_at from research_experiments order by started_at desc limit 100`;const evidence=await sql`select id,experiment_id,model_version,regime,dataset_hash,point_in_time,walk_forward,leakage_passed,transaction_costs_included,metrics,created_at from replay_evidence order by created_at desc limit 100`;const proof=await sql`select id,scope,model_version,as_of,expectancy,sharpe,sortino,calmar,max_drawdown,expected_shortfall,profit_factor,win_rate,monte_carlo_ruin_probability,metrics,source_engine,shadow_only from proof_metrics order by as_of desc limit 100`;const gates=await sql`select id,model_version,evidence_scope,sample_size,regimes,net_expectancy,max_drawdown,rolling_stability,capacity_score,stress_survival,ex_top_winners_expectancy,synthetic_rows,passed,reasons,evaluated_at from economic_proof_gates where evidence_scope='live' order by evaluated_at desc limit 50`;const returnsRows=await sql`select oo.return_60m from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' order by oo.evaluated_at desc limit 5000`;const returns=returnsRows.map(r=>Number(r.return_60m)).filter(Number.isFinite);const monteCarloResult=monteCarlo(returns);const twins=opportunityId?await getHistoricalTwins(opportunityId,30):null;const latestGate=gates[0]??null;const ladder=[{stage:'DISCOVERED',status:'available'},{stage:'OBSERVED',status:returns.length?'evidence':'waiting'},{stage:'CONFIRMED',status:Number(latestGate?.sample_size??0)>=100?'evidence':'waiting'},{stage:'QUALIFIED',status:Number(latestGate?.sample_size??0)>=500?'evidence':'waiting'},{stage:'SHADOW',status:'active'},{stage:'PROVEN',status:latestGate?.passed?'passed':'locked'},{stage:'PAPER',status:latestGate?.passed?'eligible':'active_manual'},{stage:'LIMITED CAPITAL',status:'locked'},{stage:'SCALED',status:'locked'}];return NextResponse.json({ok:true,mode:'research-shadow',evidenceScope:'live-only',replayRuns,experiments,replayEvidence:evidence,proofMetrics:proof,economicProofGates:gates,monteCarlo:monteCarloResult,historicalTwins:twins,evidenceLadder:ladder,capitalExecutionEnabled:false});}catch(error){return NextResponse.json({ok:false,error:'research_lab_failed',detail:error instanceof Error?error.message:'unknown_error',capitalExecutionEnabled:false},{status:500})}}
-
-export async function POST(request:Request){if(!sameOriginMutation(request))return NextResponse.json({ok:false,error:'origin_mismatch'},{status:403});if(!adminAuthorized(request))return NextResponse.json({ok:false,error:'admin_session_required'},{status:401});const parsed=ExperimentSchema.safeParse(await request.json().catch(()=>null));if(!parsed.success)return NextResponse.json({ok:false,error:'invalid_experiment',issues:parsed.error.flatten()},{status:400});const sql=getSql();if(!sql)return NextResponse.json({ok:false,error:'database_not_configured'},{status:503});try{const id=`research:${randomUUID()}`;const trainWindow={start:parsed.data.trainStart??null,end:parsed.data.trainEnd??null};const testWindow={start:parsed.data.testStart??null,end:parsed.data.testEnd??null};await sql`insert into research_experiments(id,engine,model_version,hypothesis,train_window,test_window,parameters,leakage_checks,status,shadow_only) values(${id},${parsed.data.engine},${parsed.data.modelVersion??null},${parsed.data.hypothesis},${sql.json(trainWindow)},${sql.json(testWindow)},${sql.json(parsed.data.parameters)},${sql.json({pointInTimeRequired:true,futureLeakageForbidden:true,transactionCostsRequired:true})},'queued',true)`;return NextResponse.json({ok:true,id,status:'queued',engine:parsed.data.engine,shadowOnly:true,capitalExecutionEnabled:false});}catch(error){return NextResponse.json({ok:false,error:'research_experiment_create_failed',detail:error instanceof Error?error.message:'unknown_error',capitalExecutionEnabled:false},{status:500})}}
+export async function POST(request: Request) {
+  if (!sameOriginMutation(request))
+    return NextResponse.json(
+      { ok: false, error: "origin_mismatch" },
+      { status: 403 },
+    );
+  if (!adminAuthorized(request))
+    return NextResponse.json(
+      { ok: false, error: "admin_session_required" },
+      { status: 401 },
+    );
+  const parsed = ExperimentSchema.safeParse(
+    await request.json().catch(() => null),
+  );
+  if (!parsed.success)
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "invalid_experiment",
+        issues: parsed.error.flatten(),
+      },
+      { status: 400 },
+    );
+  const sql = getSql();
+  if (!sql)
+    return NextResponse.json(
+      { ok: false, error: "database_not_configured" },
+      { status: 503 },
+    );
+  try {
+    const id = `research:${randomUUID()}`;
+    const trainWindow = {
+      start: parsed.data.trainStart ?? null,
+      end: parsed.data.trainEnd ?? null,
+    };
+    const testWindow = {
+      start: parsed.data.testStart ?? null,
+      end: parsed.data.testEnd ?? null,
+    };
+    await sql`insert into research_experiments(id,engine,model_version,hypothesis,train_window,test_window,parameters,leakage_checks,status,shadow_only) values(${id},${parsed.data.engine},${parsed.data.modelVersion ?? null},${parsed.data.hypothesis},${sql.json(trainWindow)},${sql.json(testWindow)},${sql.json(parsed.data.parameters)},${sql.json({ pointInTimeRequired: true, futureLeakageForbidden: true, transactionCostsRequired: true })},'queued',true)`;
+    return NextResponse.json({
+      ok: true,
+      id,
+      status: "queued",
+      engine: parsed.data.engine,
+      shadowOnly: true,
+      capitalExecutionEnabled: false,
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "research_experiment_create_failed",
+        detail: error instanceof Error ? error.message : "unknown_error",
+        capitalExecutionEnabled: false,
+      },
+      { status: 500 },
+    );
+  }
+}

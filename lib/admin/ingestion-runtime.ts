@@ -20,7 +20,8 @@ export async function getIngestionPolicies(now=new Date()):Promise<Record<string
 
 export async function recordIngestionResult(policy:IngestionPolicy,status:'success'|'degraded'|'skipped',error?:string|null){
  const sql=getSql();if(!sql)return;
+ const settingsJson=JSON.parse(JSON.stringify(policy.settings)) as any;
  await sql`insert into ingestion_settings(id,pipeline_key,display_name,enabled,cadence_minutes,batch_size,source_priority,settings,last_run_at,last_status,last_error,updated_at)
- values(${`ingestion:${policy.key}`},${policy.key},${policy.displayName},${policy.enabled},${policy.cadenceMinutes},${policy.batchSize},'[]'::jsonb,${sql.json(policy.settings)},now(),${status},${error??null},now())
+ values(${`ingestion:${policy.key}`},${policy.key},${policy.displayName},${policy.enabled},${policy.cadenceMinutes},${policy.batchSize},'[]'::jsonb,${sql.json(settingsJson)},now(),${status},${error??null},now())
  on conflict(pipeline_key) do update set last_run_at=excluded.last_run_at,last_status=excluded.last_status,last_error=excluded.last_error,updated_at=now()`;
 }

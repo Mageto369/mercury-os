@@ -5,7 +5,9 @@ const quickLinkStyle = {padding:'9px 12px',border:'1px solid #263044',borderRadi
 
 export default function Home() {
   return <>
-    <div style={{position:'fixed',right:18,bottom:18,zIndex:50,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end'}}>
+    <div style={{position:'fixed',right:18,bottom:18,zIndex:50,display:'flex',gap:8,flexWrap:'wrap',justifyContent:'flex-end',maxWidth:'min(900px,calc(100vw - 36px))'}}>
+      <Link href="/operations" aria-label="Open Operations Command Center" style={quickLinkStyle}>Operations</Link>
+      <Link href="/research-lab" aria-label="Open Research and Proof Lab" style={quickLinkStyle}>Research Lab</Link>
       <Link href="/ai" aria-label="Open AI and Signal Intelligence" style={quickLinkStyle}>AI & Signals</Link>
       <Link href="/market" aria-label="Open Market Intelligence" style={quickLinkStyle}>Market Intelligence</Link>
       <Link href="/paper" aria-label="Open Paper Trading" style={quickLinkStyle}>Paper Trading</Link>

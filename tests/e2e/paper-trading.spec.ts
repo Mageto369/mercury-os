@@ -9,7 +9,7 @@ test('paper trading terminal is accessible and explicitly non-capital', async ({
   await page.getByRole('button', { name: 'Orders' }).click();
   await expect(page.getByRole('heading', { name: 'Paper Order Management' })).toBeVisible();
   await page.getByRole('button', { name: 'Risk' }).click();
-  await expect(page.getByRole('heading', { name: 'Risk Controls' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Portfolio Risk Budget' })).toBeVisible();
   await expect(page.getByText('BLOCKED')).toBeVisible();
 });
 

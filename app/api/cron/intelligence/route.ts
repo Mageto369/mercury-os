@@ -6,6 +6,7 @@ import { buildShadowPortfolio } from '@/lib/portfolio/shadow-portfolio';
 import { pullAndPersistMarketData } from '@/lib/providers/market/router';
 import { runOpenDataMesh } from '@/lib/providers/open-data/mesh';
 import { runOpenIntelligenceSync } from '@/lib/integrations/open-intelligence-sync';
+import { runDeepIntelligence } from '@/lib/intelligence/deep-intelligence';
 
 export const runtime = 'nodejs';
 
@@ -17,9 +18,11 @@ export async function GET(request: Request) {
   let marketRefresh: Awaited<ReturnType<typeof pullAndPersistMarketData>> | { ok:false; reason:string };
   let openDataRefresh: Awaited<ReturnType<typeof runOpenDataMesh>> | { ok:false; reason:string };
   let openIntelligenceRefresh: Awaited<ReturnType<typeof runOpenIntelligenceSync>> | { ok:false; reason:string };
+  let deepIntelligence: Awaited<ReturnType<typeof runDeepIntelligence>> | { ok:false; reason:string };
   try { marketRefresh = await pullAndPersistMarketData(); } catch (error) { marketRefresh = { ok:false, reason:error instanceof Error ? error.message : 'market_refresh_failed' }; }
   try { openDataRefresh = await runOpenDataMesh(); } catch (error) { openDataRefresh = { ok:false, reason:error instanceof Error ? error.message : 'open_data_refresh_failed' }; }
   try { openIntelligenceRefresh = await runOpenIntelligenceSync(); } catch (error) { openIntelligenceRefresh = { ok:false, reason:error instanceof Error ? error.message : 'open_intelligence_refresh_failed' }; }
+  try { deepIntelligence = await runDeepIntelligence(); } catch (error) { deepIntelligence = { ok:false, reason:error instanceof Error ? error.message : 'deep_intelligence_failed' }; }
 
   const result = await runSupervisor(new Date());
   let outcomeMaturation: Awaited<ReturnType<typeof matureOpportunityOutcomes>> | { ok:false; reason:string };
@@ -34,7 +37,7 @@ export async function GET(request: Request) {
     supervisor:result.supervisor, startedAt:result.startedAt, completedAt:result.completedAt,
     dueJobs:result.dueJobs, completed:result.completed, degraded:result.degraded, skipped:result.skipped,
     persistedAudits:result.assignments.filter((assignment)=>assignment.persisted).length,
-    escalations:result.escalations, marketRefresh, openDataRefresh, openIntelligenceRefresh, outcomeMaturation, sourceReputation, shadowPortfolio,
+    escalations:result.escalations, marketRefresh, openDataRefresh, openIntelligenceRefresh, deepIntelligence, outcomeMaturation, sourceReputation, shadowPortfolio,
     jobs:result.assignments,
   });
 }

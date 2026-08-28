@@ -1,4 +1,4 @@
-import { test, expect, type APIRequestContext } from '@playwright/test';
+import { test, expect, type APIRequestContext, type APIResponse } from '@playwright/test';
 
 const pages = [
   ['/', 'Mercury'],
@@ -59,7 +59,7 @@ test.describe('extreme controlled stress', () => {
 
   test('protected mutation surfaces fail closed under unauthorized bursts', async ({ request }) => {
     test.setTimeout(120_000);
-    const attempts: Array<Promise<ReturnType<APIRequestContext['post']>>> = [];
+    const attempts: Promise<APIResponse>[] = [];
     for (let i = 0; i < 30; i++) {
       attempts.push(request.post('/api/paper/orders', { data: { symbol: 'TEST', side: 'buy', quantity: 1, orderType: 'market' } }));
       attempts.push(request.post('/api/paper/risk', { data: { symbol: 'TEST', conviction: 50 } }));

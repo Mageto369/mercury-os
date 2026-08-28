@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { PaperTradingTerminal } from '@/components/paper-trading-terminal';
+import './paper.css';
 
 export default function PaperTradingPage() {
   return <main className="admin-shell paper-shell">

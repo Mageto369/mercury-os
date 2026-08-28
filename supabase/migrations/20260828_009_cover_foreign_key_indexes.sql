@@ -1,0 +1,15 @@
+create index if not exists autonomous_actions_workflow_run_idx on public.autonomous_actions(workflow_run_id);
+create index if not exists corporate_actions_security_idx on public.corporate_actions(security_id);
+create index if not exists decision_logs_opportunity_idx on public.decision_logs(opportunity_id);
+create index if not exists decision_logs_security_idx on public.decision_logs(security_id);
+create index if not exists filings_security_idx on public.filings(security_id);
+create index if not exists finra_regsho_security_idx on public.finra_regsho_daily(security_id);
+create index if not exists model_ensemble_scores_security_idx on public.model_ensemble_scores(security_id);
+create index if not exists paper_orders_opportunity_idx on public.paper_orders(opportunity_id);
+create index if not exists paper_orders_security_idx on public.paper_orders(security_id);
+create index if not exists portfolio_decisions_opportunity_idx on public.portfolio_decisions(opportunity_id);
+create index if not exists portfolio_decisions_security_idx on public.portfolio_decisions(security_id);
+create index if not exists replay_evidence_experiment_idx on public.replay_evidence(experiment_id);
+create index if not exists risk_incidents_security_idx on public.risk_incidents(security_id);
+create index if not exists security_identities_security_idx on public.security_identities(security_id);
+create index if not exists signal_observations_opportunity_idx on public.signal_observations(opportunity_id);

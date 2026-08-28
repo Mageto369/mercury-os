@@ -15,6 +15,10 @@ const OrderSchema = z.object({
   quantity: z.number().positive().max(10_000_000),
   orderType: z.enum(['market', 'limit']).default('market'),
   limitPrice: z.number().positive().optional(),
+  timeInForce: z.enum(['day', 'gtc']).default('day'),
+  thesis: z.string().max(4000).optional(),
+  catalyst: z.string().max(2000).optional(),
+  riskNotes: z.string().max(2000).optional(),
 }).superRefine((value, ctx) => {
   if (value.orderType === 'limit' && value.limitPrice == null) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['limitPrice'], message: 'Limit price required' });
 });
@@ -35,6 +39,7 @@ export async function POST(request: Request) {
       const [security] = await tx`select id,symbol,market from securities where upper(symbol)=${input.symbol} and active=true and id not like 'validation:%' limit 1`;
       if (!security) return { status:404, body:{ ok:false, error:'security_not_found' } };
 
+      const [opportunity] = await tx`select id,state,observed_at from opportunities where security_id=${security.id} order by observed_at desc limit 1`;
       const [snapshot] = await tx`select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at from market_snapshots where security_id=${security.id} order by observed_at desc limit 1`;
       if (!snapshot) return { status:409, body:{ ok:false, error:'market_snapshot_required' } };
 
@@ -42,29 +47,41 @@ export async function POST(request: Request) {
       const sidePrice = input.side === 'buy' ? Number(snapshot.ask ?? snapshot.price) : Number(snapshot.bid ?? snapshot.price);
       const referencePrice = Number.isFinite(sidePrice) && sidePrice > 0 ? sidePrice : mark;
       const requestedPrice = input.orderType === 'limit' ? Number(input.limitPrice) : referencePrice;
-      if (input.orderType === 'limit') {
-        const crosses = input.side === 'buy' ? requestedPrice >= referencePrice : requestedPrice <= referencePrice;
-        if (!crosses) return { status:409, body:{ ok:false, error:'limit_not_marketable', referencePrice } };
-      }
-
       const notional = input.quantity * referencePrice;
       const simulation = simulateExecution({ notional, price:referencePrice, dollarVolume:Number(snapshot.dollar_volume ?? 0), spreadBps:Number(snapshot.spread_bps ?? 0), rvol:Number(snapshot.rvol ?? 1), floatRotation:Number(snapshot.float_rotation ?? 0) });
       const slip = simulation.estimatedOneWayCostBps / 10_000;
       const fillPrice = input.side === 'buy' ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
       const orderId = `paper:${randomUUID()}`;
+      const eventId = () => `paper-event:${randomUUID()}`;
+      const journalId = `paper-journal:${randomUUID()}`;
+      const commissionBps = Math.max(0, Number(process.env.PAPER_COMMISSION_BPS ?? 0));
+      const feeAmount = Number((notional * commissionBps / 10_000).toFixed(6));
+
       const [account] = await tx`select * from paper_accounts where id=${DEFAULT_PAPER_ACCOUNT_ID} for update`;
       const [position] = await tx`select * from paper_positions where account_id=${DEFAULT_PAPER_ACCOUNT_ID} and security_id=${security.id} for update`;
       const currentQty = Number(position?.quantity ?? 0);
       const currentAvg = Number(position?.average_cost ?? 0);
       const currentCash = Number(account?.cash ?? 0);
 
+      if (input.orderType === 'limit') {
+        const crosses = input.side === 'buy' ? requestedPrice >= referencePrice : requestedPrice <= referencePrice;
+        if (!crosses) {
+          await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,status,order_type,time_in_force,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},'open',${input.orderType},${input.timeInForce},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
+          await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'accepted','open',${tx.json({referencePrice,requestedPrice,timeInForce:input.timeInForce})})`;
+          await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at,opportunityState:opportunity?.state ?? null})})`;
+          return { status:202, body:{ ok:true, orderId, status:'open', symbol:security.symbol, side:input.side, quantity:input.quantity, requestedPrice, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
+        }
+      }
+
       let rejectReason: string | null = null;
       if (simulation.capacityExceeded) rejectReason = 'liquidity_capacity_exceeded';
-      if (input.side === 'buy' && currentCash < input.quantity * fillPrice) rejectReason = 'insufficient_virtual_cash';
+      if (input.side === 'buy' && currentCash < input.quantity * fillPrice + feeAmount) rejectReason = 'insufficient_virtual_cash';
       if (input.side === 'sell' && currentQty < input.quantity) rejectReason = 'insufficient_virtual_position';
 
       if (rejectReason) {
-        await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,slippage_bps,reject_reason,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},0,${requestedPrice},null,'rejected',${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,orderType:input.orderType,referencePrice,capitalExecutionEnabled:false})},false)`;
+        await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,slippage_bps,reject_reason,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},null,'rejected',${input.orderType},${input.timeInForce},0,${simulation.estimatedOneWayCostBps},${rejectReason},${tx.json({...simulation,referencePrice,capitalExecutionEnabled:false})},false)`;
+        await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'rejected','rejected',${tx.json({reason:rejectReason,referencePrice})})`;
+        await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context,outcome) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at})},${tx.json({status:'rejected',reason:rejectReason})})`;
         return { status:409, body:{ ok:false, error:rejectReason, orderId, simulation, capitalExecutionEnabled:false } };
       }
 
@@ -72,17 +89,25 @@ export async function POST(request: Request) {
         const newQty = currentQty + input.quantity;
         const newAvg = newQty > 0 ? ((currentQty * currentAvg) + (input.quantity * fillPrice)) / newQty : 0;
         await tx`insert into paper_positions(id,account_id,security_id,quantity,average_cost,realized_pnl) values(${`pos:${DEFAULT_PAPER_ACCOUNT_ID}:${security.id}`},${DEFAULT_PAPER_ACCOUNT_ID},${security.id},${newQty},${newAvg},0) on conflict(account_id,security_id) do update set quantity=${newQty},average_cost=${newAvg},updated_at=now()`;
-        await tx`update paper_accounts set cash=cash-${input.quantity * fillPrice},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+        await tx`update paper_accounts set cash=cash-${input.quantity * fillPrice + feeAmount},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       } else {
         const proceeds = input.quantity * fillPrice;
-        const realized = (fillPrice - currentAvg) * input.quantity;
+        const realized = (fillPrice - currentAvg) * input.quantity - feeAmount;
         const newQty = currentQty - input.quantity;
         await tx`update paper_positions set quantity=${newQty},realized_pnl=realized_pnl+${realized},updated_at=now() where account_id=${DEFAULT_PAPER_ACCOUNT_ID} and security_id=${security.id}`;
-        await tx`update paper_accounts set cash=cash+${proceeds},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+        await tx`update paper_accounts set cash=cash+${proceeds - feeAmount},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       }
 
-      await tx`insert into paper_orders(id,security_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,latency_ms,slippage_bps,simulation,capital_execution_enabled) values(${orderId},${security.id},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,orderType:input.orderType,referencePrice,fillPrice,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
-      return { status:200, body:{ ok:true, orderId, symbol:security.symbol, side:input.side, quantity:input.quantity, fillPrice, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
+      await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,latency_ms,slippage_bps,simulation,capital_execution_enabled) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',${input.orderType},${input.timeInForce},${feeAmount},0,${simulation.estimatedOneWayCostBps},${tx.json({...simulation,referencePrice,fillPrice,commissionBps,capitalExecutionEnabled:false,brokerConnected:false})},false)`;
+      await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'filled','filled',${tx.json({referencePrice,fillPrice,feeAmount,slippageBps:simulation.estimatedOneWayCostBps})})`;
+      await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context,outcome) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${tx.json({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at,opportunityState:opportunity?.state ?? null})},${tx.json({status:'filled',fillPrice,feeAmount,slippageBps:simulation.estimatedOneWayCostBps})})`;
+
+      const [postAccount] = await tx`select cash,realized_pnl from paper_accounts where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+      const [marking] = await tx`select coalesce(sum(pp.quantity * coalesce(latest.price,pp.average_cost)),0) as market_value, coalesce(sum(pp.quantity * (coalesce(latest.price,pp.average_cost)-pp.average_cost)),0) as unrealized_pnl, count(*) filter(where pp.quantity>0)::int as position_count from paper_positions pp left join lateral (select price from market_snapshots ms where ms.security_id=pp.security_id order by observed_at desc limit 1) latest on true where pp.account_id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+      const cash = Number(postAccount?.cash ?? 0); const marketValue = Number(marking?.market_value ?? 0); const unrealizedPnl = Number(marking?.unrealized_pnl ?? 0); const realizedPnl = Number(postAccount?.realized_pnl ?? 0);
+      await tx`insert into paper_account_snapshots(id,account_id,cash,market_value,equity,realized_pnl,unrealized_pnl,gross_exposure,position_count,metadata) values(${`paper-snapshot:${randomUUID()}`},${DEFAULT_PAPER_ACCOUNT_ID},${cash},${marketValue},${cash+marketValue},${realizedPnl},${unrealizedPnl},${marketValue},${Number(marking?.position_count ?? 0)},${tx.json({trigger:'order_fill',orderId})})`;
+
+      return { status:200, body:{ ok:true, orderId, status:'filled', symbol:security.symbol, side:input.side, quantity:input.quantity, fillPrice, feeAmount, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
     });
     return NextResponse.json(result.body, { status:result.status });
   } catch (error) {

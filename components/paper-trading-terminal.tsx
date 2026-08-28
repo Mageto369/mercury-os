@@ -6,7 +6,7 @@ import { Activity, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
 type PaperOrder = {
   id: string;
   symbol: string;
-  exchange?: string | null;
+  market?: string | null;
   side: string;
   requested_qty: string | number;
   filled_qty: string | number;
@@ -106,5 +106,5 @@ export function PaperTradingTerminal() {
 
 function OrderTable({orders,statusTone}:{orders:PaperOrder[];statusTone:(status:string)=>string}) {
   if (!orders.length) return <div className="paper-empty"><b>No paper orders yet</b><span>The terminal is connected to the ledger, but no live paper-order records exist.</span></div>;
-  return <div className="table-scroll"><table className="command-table paper-orders"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Requested</th><th>Filled</th><th>Req. Price</th><th>Fill Price</th><th>Slippage</th><th>Latency</th><th>Status</th></tr></thead><tbody>{orders.map(order=><tr key={order.id}><td>{new Date(order.created_at).toLocaleString()}</td><td><b>{order.symbol}</b><small>{order.exchange ?? '—'}</small></td><td>{order.side}</td><td>{Number(order.requested_qty).toLocaleString()}</td><td>{Number(order.filled_qty).toLocaleString()}</td><td>{order.requested_price == null ? '—' : `$${Number(order.requested_price).toFixed(4)}`}</td><td>{order.average_fill_price == null ? '—' : `$${Number(order.average_fill_price).toFixed(4)}`}</td><td>{order.slippage_bps == null ? '—' : `${Number(order.slippage_bps).toFixed(2)} bps`}</td><td>{order.latency_ms == null ? '—' : `${order.latency_ms} ms`}</td><td><span className={`badge ${statusTone(order.status)}`}>{order.status.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>;
+  return <div className="table-scroll"><table className="command-table paper-orders"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Requested</th><th>Filled</th><th>Req. Price</th><th>Fill Price</th><th>Slippage</th><th>Latency</th><th>Status</th></tr></thead><tbody>{orders.map(order=><tr key={order.id}><td>{new Date(order.created_at).toLocaleString()}</td><td><b>{order.symbol}</b><small>{order.market ?? '—'}</small></td><td>{order.side}</td><td>{Number(order.requested_qty).toLocaleString()}</td><td>{Number(order.filled_qty).toLocaleString()}</td><td>{order.requested_price == null ? '—' : `$${Number(order.requested_price).toFixed(4)}`}</td><td>{order.average_fill_price == null ? '—' : `$${Number(order.average_fill_price).toFixed(4)}`}</td><td>{order.slippage_bps == null ? '—' : `${Number(order.slippage_bps).toFixed(2)} bps`}</td><td>{order.latency_ms == null ? '—' : `${order.latency_ms} ms`}</td><td><span className={`badge ${statusTone(order.status)}`}>{order.status.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>;
 }

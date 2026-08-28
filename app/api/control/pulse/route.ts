@@ -6,8 +6,11 @@ export const runtime = 'nodejs';
 function sameOrigin(request: Request) {
   if (process.env.NODE_ENV !== 'production') return true;
   const origin = request.headers.get('origin');
+  // Non-browser/internal clients commonly omit Origin. The pulse is a read-only
+  // schedule preview, so only reject requests that explicitly present a foreign origin.
+  if (!origin) return true;
   const host = request.headers.get('host');
-  if (!origin || !host) return false;
+  if (!host) return false;
   try {
     return new URL(origin).host === host;
   } catch {

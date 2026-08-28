@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { securities, shareStructures } from '@/lib/db/schema';
@@ -24,7 +24,7 @@ const bodySchema = z.object({ structures: z.array(structureSchema).min(1).max(50
 export async function POST(request: Request) {
   const secret = process.env.STRUCTURE_INGEST_SECRET ?? process.env.CRON_SECRET;
   if (!secret) return NextResponse.json({ ok: false, error: 'structure_ingest_secret_not_configured' }, { status: 503 });
-  if (request.headers.get('authorization') !== `Bearer ${secret}`) {
+  if (!bearerSecretMatches(request.headers.get('authorization'), secret)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 

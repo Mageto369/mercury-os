@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { securities, socialMentions } from '@/lib/db/schema';
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   }
 
   const auth = request.headers.get('authorization');
-  if (auth !== `Bearer ${secret}`) {
+  if (!bearerSecretMatches(auth, secret)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 

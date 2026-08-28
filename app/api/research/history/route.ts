@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';import { bearerSecretMatches } from '@/lib/security/request-auth';
 import { backfillHistoricalMarket, getHistoricalBackfillStatus } from '@/lib/research/historical-backfill';
 import { computeSetupFingerprints } from '@/lib/research/setup-fingerprints';
 
@@ -10,7 +10,7 @@ export async function GET() {
 
 export async function POST(request: Request) {
   const secret = process.env.CRON_SECRET;
-  if (!secret || request.headers.get('authorization') !== `Bearer ${secret}`) {
+  if (!secret || !bearerSecretMatches(request.headers.get('authorization'), secret)) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
   const body = await request.json().catch(() => ({})) as { startDate?: string; endDate?: string; provider?: 'massive' | 'intrinio' | 'openbb' | 'auto'; computeFingerprints?: boolean };

@@ -7,3 +7,4 @@ vectorbt>=0.28,<1
 quantstats>=0.0.77,<1
 yfinance>=0.2.65,<1
 backtrader>=1.9.78.123,<2
+httpx>=0.27,<1

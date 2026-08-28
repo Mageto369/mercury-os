@@ -79,7 +79,12 @@ export async function POST(request: Request) {
       const notional = input.quantity * referencePrice;
       const simulation = simulateExecution({ notional, price:referencePrice, dollarVolume:Number(snapshot.dollar_volume ?? 0), spreadBps:Number(snapshot.spread_bps ?? 0), rvol:Number(snapshot.rvol ?? 1), floatRotation:Number(snapshot.float_rotation ?? 0) });
       const slip = simulation.estimatedOneWayCostBps / 10_000;
-      const fillPrice = input.side === 'buy' ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
+      const slippedPrice = input.side === 'buy' ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
+      // Simulated slippage may not push a limit order through its own limit
+      // price: a buy limit can never fill above it, a sell limit never below.
+      const fillPrice = input.orderType === 'limit'
+        ? (input.side === 'buy' ? Math.min(slippedPrice, requestedPrice) : Math.max(slippedPrice, requestedPrice))
+        : slippedPrice;
       const orderId = `paper:${randomUUID()}`;
       const eventId = () => `paper-event:${randomUUID()}`;
       const journalId = `paper-journal:${randomUUID()}`;

@@ -14,3 +14,8 @@ export function requireBearerSecret(request: Request, secret: string | undefined
   if (!safeEqual(auth, expected)) return { ok: false as const, reason: 'unauthorized' as const, status: 401 as const };
   return { ok: true as const };
 }
+
+export function bearerSecretMatches(authorization: string | null | undefined, secret: string | undefined) {
+  if (!secret) return false;
+  return safeEqual(authorization ?? '', `Bearer ${secret}`);
+}

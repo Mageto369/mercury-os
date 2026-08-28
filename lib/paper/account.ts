@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db';
+import { reservedCashFor } from '@/lib/paper/order-engine';
 
 export const DEFAULT_PAPER_ACCOUNT_ID = 'paper:primary';
 export const DEFAULT_STARTING_CAPITAL = 100_000;
@@ -83,7 +84,11 @@ export async function getPaperAccountSnapshot() {
   const equity = cash + marketValue;
   const totalPnl = equity - startingCapital;
   const grossExposure = marketValue;
-  const buyingPower = Math.max(0, cash);
+  // Cash already committed by resting buy orders is not available to spend
+  // again. Reporting raw cash as buying power let one dollar back any number of
+  // open orders.
+  const reservedCash = await reservedCashFor(sql);
+  const buyingPower = Math.max(0, cash - reservedCash);
 
   return {
     id: account.id,
@@ -91,6 +96,7 @@ export async function getPaperAccountSnapshot() {
     status: account.status,
     startingCapital,
     cash,
+    reservedCash,
     buyingPower,
     equity,
     marketValue,

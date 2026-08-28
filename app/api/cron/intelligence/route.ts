@@ -3,6 +3,7 @@ import { runSupervisor } from '@/lib/agents/supervisor';
 import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 import { refreshSourceReputation } from '@/lib/research/source-reputation';
 import { buildShadowPortfolio } from '@/lib/portfolio/shadow-portfolio';
+import { settleRestingOrders } from '@/lib/paper/order-engine';
 import { pullAndPersistMarketData } from '@/lib/providers/market/router';
 import { runOpenDataMesh } from '@/lib/providers/open-data/mesh';
 import { runOpenIntelligenceSync } from '@/lib/integrations/open-intelligence-sync';
@@ -58,10 +59,14 @@ export async function GET(request: Request) {
   let signalAttribution: Awaited<ReturnType<typeof runSignalAttribution>> | { ok:false; reason:string };
   let sourceReputation: Awaited<ReturnType<typeof refreshSourceReputation>> | { ok:false; reason:string };
   let shadowPortfolio: Awaited<ReturnType<typeof buildShadowPortfolio>> | { ok:false; reason:string };
+  let restingOrders: Awaited<ReturnType<typeof settleRestingOrders>> | { ok:false; reason:string };
   try { outcomeMaturation = await matureOpportunityOutcomes(250); } catch (error) { outcomeMaturation = { ok:false, reason:error instanceof Error ? error.message : 'outcome_maturation_failed' }; }
   try { signalAttribution = await runSignalAttribution(); } catch (error) { signalAttribution = { ok:false, reason:error instanceof Error ? error.message : 'signal_attribution_failed' }; }
   try { sourceReputation = await refreshSourceReputation(); } catch (error) { sourceReputation = { ok:false, reason:error instanceof Error ? error.message : 'source_reputation_failed' }; }
   try { shadowPortfolio = await buildShadowPortfolio(); } catch (error) { shadowPortfolio = { ok:false, reason:error instanceof Error ? error.message : 'shadow_portfolio_failed' }; }
+  // Resting orders are the other half of the paper lifecycle: without this pass
+  // an open limit order can never fill and a day order never expires.
+  try { restingOrders = await settleRestingOrders(now); } catch (error) { restingOrders = { ok:false, reason:error instanceof Error ? error.message : 'resting_order_settlement_failed' }; }
 
   return NextResponse.json({
     ok:true, mode:result.mode, autonomousExecution:false, capitalExecutionEnabled:false,
@@ -69,7 +74,7 @@ export async function GET(request: Request) {
     dueJobs:result.dueJobs, completed:result.completed, degraded:result.degraded, skipped:result.skipped,
     persistedAudits:result.assignments.filter((assignment)=>assignment.persisted).length,
     escalations:result.escalations, ingestionPolicies:ingestion, marketRefresh, openDataRefresh, openIntelligenceRefresh, entityGraph, deepIntelligence,
-    outcomeMaturation, signalAttribution, sourceReputation, shadowPortfolio,
+    outcomeMaturation, signalAttribution, sourceReputation, shadowPortfolio, restingOrders,
     jobs:result.assignments,
   });
 }

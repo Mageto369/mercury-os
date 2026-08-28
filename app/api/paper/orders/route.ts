@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { getSql } from '@/lib/db';
 import { clampSimulatedFillPrice, simulateExecution } from '@/lib/execution/simulator';
 import { DEFAULT_PAPER_ACCOUNT_ID, ensurePaperAccount } from '@/lib/paper/account';
+import { reservedCashFor } from '@/lib/paper/order-engine';
 import { adminAuthorized, sameOriginMutation } from '@/lib/admin/security';
 import { toJsonb } from '@/lib/db/json';
 
@@ -97,15 +98,30 @@ export async function POST(request: Request) {
       const [position] = await tx`select * from paper_positions where account_id=${DEFAULT_PAPER_ACCOUNT_ID} and security_id=${security.id} for update`;
       const currentQty = Number(position?.quantity ?? 0);
       const currentAvg = Number(position?.average_cost ?? 0);
-      const currentCash = Number(account?.cash ?? 0);
+      // Cash committed by orders already resting is not available to this one.
+      const reservedCash = await reservedCashFor(tx);
+      const currentCash = Number(account?.cash ?? 0) - reservedCash;
 
       if (input.orderType === 'limit') {
         const crosses = input.side === 'buy' ? requestedPrice >= referencePrice : requestedPrice <= referencePrice;
         if (!crosses) {
+          // A resting order commits its cash for as long as it rests, so it is
+          // checked against available buying power before it is accepted.
+          const restingReason = input.side === 'buy' && currentCash < input.quantity * requestedPrice
+            ? 'insufficient_virtual_cash'
+            : input.side === 'sell' && currentQty < input.quantity
+              ? 'insufficient_virtual_position'
+              : null;
+          if (restingReason) {
+            await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,status,order_type,time_in_force,reject_reason,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},'rejected',${input.orderType},${input.timeInForce},${restingReason},${toJsonb({...simulation,referencePrice,capitalExecutionEnabled:false})}::jsonb,false,${idempotencyKey},${requestFingerprint})`;
+            await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'rejected','rejected',${toJsonb({reason:restingReason,referencePrice,requestedPrice})}::jsonb)`;
+            await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context,outcome) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${toJsonb({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at})}::jsonb,${toJsonb({status:'rejected',reason:restingReason})}::jsonb)`;
+            return { status:409, body:{ ok:false, error:restingReason, orderId, simulation, capitalExecutionEnabled:false } };
+          }
           await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,status,order_type,time_in_force,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},0,${requestedPrice},'open',${input.orderType},${input.timeInForce},${toJsonb({...simulation,referencePrice,capitalExecutionEnabled:false,brokerConnected:false})}::jsonb,false,${idempotencyKey},${requestFingerprint})`;
           await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'accepted','open',${toJsonb({referencePrice,requestedPrice,timeInForce:input.timeInForce})}::jsonb)`;
           await tx`insert into paper_trade_journal(id,order_id,security_id,opportunity_id,thesis,catalyst,risk_notes,context) values(${journalId},${orderId},${security.id},${opportunity?.id ?? null},${input.thesis ?? null},${input.catalyst ?? null},${input.riskNotes ?? null},${toJsonb({symbol:security.symbol,market:security.market,orderType:input.orderType,side:input.side,quantity:input.quantity,referencePrice,snapshotAt:snapshot.observed_at,opportunityState:opportunity?.state ?? null})}::jsonb)`;
-          return { status:202, body:{ ok:true, orderId, status:'open', symbol:security.symbol, side:input.side, quantity:input.quantity, requestedPrice, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
+          return { status:202, body:{ ok:true, orderId, status:'open', symbol:security.symbol, side:input.side, quantity:input.quantity, requestedPrice, timeInForce:input.timeInForce, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
         }
       }
 

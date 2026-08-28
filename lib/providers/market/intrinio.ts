@@ -1,3 +1,4 @@
+import { resolveIntegrationSecret } from '@/lib/admin/vault';
 import type { MarketProvider, MarketProviderPullResult, NormalizedMarketSnapshot } from '@/lib/providers/market/types';
 
 type IntrinioRealtimeResponse = {
@@ -17,10 +18,10 @@ function spreadBps(bid?: number, ask?: number) {
 
 export const intrinioMarketProvider: MarketProvider = {
   name: 'intrinio',
-  configured: () => Boolean(process.env.INTRINIO_API_KEY),
+  configured: () => Boolean(process.env.INTRINIO_API_KEY ?? process.env.MERCURY_VAULT_KEY),
   async pull(symbols): Promise<MarketProviderPullResult> {
     const startedAt = new Date();
-    const key = process.env.INTRINIO_API_KEY;
+    const key = await resolveIntegrationSecret('intrinio', ['INTRINIO_API_KEY']);
     if (!key) return { provider: 'intrinio', ok: false, snapshots: [], requested: symbols.length, received: 0, errors: [{ message: 'intrinio_api_key_not_configured' }], startedAt: startedAt.toISOString(), completedAt: new Date().toISOString() };
 
     const snapshots: NormalizedMarketSnapshot[] = [];
@@ -36,6 +37,7 @@ export const intrinioMarketProvider: MarketProvider = {
           const response = await fetch(`https://api-v2.intrinio.com/securities/${encodeURIComponent(symbol)}/prices/realtime`, {
             cache: 'no-store',
             signal: controller.signal,
+            redirect: 'error',
             headers: { Authorization: `Bearer ${key}` },
           });
           clearTimeout(timeout);

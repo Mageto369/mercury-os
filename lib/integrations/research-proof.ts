@@ -30,7 +30,8 @@ export async function runResearchProofCycle() {
     ORDER BY oo.evaluated_at ASC
     LIMIT 1500
   `;
-  if (rows.length < 20) return { ok:false as const, reason:'insufficient_live_outcomes' as const, samples:rows.length, mode:'shadow' as const, capitalExecutionEnabled:false as const };
+  const minimum = Math.max(20, Math.min(500, Number(process.env.RESEARCH_PROOF_MIN_OUTCOMES ?? 20)));
+  if (rows.length < minimum) return { ok:false as const, reason:'insufficient_live_outcomes' as const, samples:rows.length, required:minimum, mode:'shadow' as const, capitalExecutionEnabled:false as const };
 
   const timestamps = rows.map((r) => new Date(String(r.evaluated_at)).toISOString());
   const returns = rows.map((r) => Number(r.return_60m) / 100);
@@ -47,15 +48,19 @@ export async function runResearchProofCycle() {
   });
 
   let backtrader: Awaited<ReturnType<typeof callSidecar<BacktraderResponse>>> | null = null;
-  const bars = await sql`
-    SELECT hb.bar_time, hb.open, hb.high, hb.low, hb.close, hb.volume
+  const [leader] = await sql`
+    SELECT hb.security_id, count(*)::int AS bars
     FROM historical_bars hb
     JOIN securities s ON s.id = hb.security_id
     WHERE hb.timeframe='1d' AND s.id NOT LIKE 'validation:%' AND hb.open IS NOT NULL AND hb.high IS NOT NULL AND hb.low IS NOT NULL AND hb.close IS NOT NULL
-    ORDER BY hb.bar_time ASC
-    LIMIT 500
+    GROUP BY hb.security_id ORDER BY count(*) DESC LIMIT 1
   `;
-  if (bars.length >= 40) {
+  if (leader && Number(leader.bars) >= 40) {
+    const bars = await sql`
+      SELECT bar_time, open, high, low, close, volume FROM historical_bars
+      WHERE security_id=${String(leader.security_id)} AND timeframe='1d' AND open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL
+      ORDER BY bar_time ASC LIMIT 500
+    `;
     backtrader = await callSidecar<BacktraderResponse>(baseUrl(), '/backtrader/challenger', {
       method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({
         timestamps:bars.map((r)=>new Date(String(r.bar_time)).toISOString()),

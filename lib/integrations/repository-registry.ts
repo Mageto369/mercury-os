@@ -17,5 +17,8 @@ export const repositoryIntegrations = [
 ] as const satisfies ReadonlyArray<Integration>;
 
 export function getRepositoryIntegrationStatus() {
-  return repositoryIntegrations.map(x => ({...x, configured:Boolean(process.env[x.enabledEnv] || (x.sharedOpenIntelligence && process.env.OPEN_INTELLIGENCE_URL)), capitalExecutionEnabled:false as const}));
+  return repositoryIntegrations.map(x => {
+    const shared = 'sharedOpenIntelligence' in x && x.sharedOpenIntelligence === true;
+    return {...x, configured:Boolean(process.env[x.enabledEnv] || (shared && process.env.OPEN_INTELLIGENCE_URL)), capitalExecutionEnabled:false as const};
+  });
 }

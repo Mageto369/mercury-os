@@ -3,10 +3,7 @@ import { expect, test } from '@playwright/test';
 test('database bootstrap is protected and fails closed without a database', async ({ request }) => {
   const unauthorized = await request.post('/api/admin/bootstrap');
   expect(unauthorized.status()).toBe(401);
-
-  const unavailable = await request.post('/api/admin/bootstrap', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-  });
+  const unavailable = await request.post('/api/admin/bootstrap', { headers: { authorization: 'Bearer mercury-e2e-cron-secret' } });
   expect(unavailable.status()).toBe(503);
   const json = await unavailable.json();
   expect(json.ok).toBe(false);
@@ -31,9 +28,15 @@ test('agent heartbeat health reports persistent state truthfully', async ({ requ
 
 test('production readiness, performance, and promotion gates are visible and fail-closed', async ({ page, request }) => {
   await page.goto('/');
+
+  await page.getByRole('button', { name: 'Audit', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Production Readiness' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Portfolio', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Shadow Performance' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Shadow Promotion Gate' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Models', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Mercury Intelligence Lab' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Market Feed Fabric' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Historical Replay' })).toBeVisible();
@@ -63,10 +66,7 @@ test('production readiness, performance, and promotion gates are visible and fai
 test('validation universe seeding is protected and requires Postgres', async ({ request }) => {
   const unauthorized = await request.post('/api/admin/seed-validation');
   expect(unauthorized.status()).toBe(401);
-
-  const authorized = await request.post('/api/admin/seed-validation', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-  });
+  const authorized = await request.post('/api/admin/seed-validation', { headers: { authorization: 'Bearer mercury-e2e-cron-secret' } });
   expect(authorized.status()).toBe(503);
   const json = await authorized.json();
   expect(json.ok).toBe(false);
@@ -76,10 +76,7 @@ test('validation universe seeding is protected and requires Postgres', async ({ 
 test('one-shot shadow activation is protected and fails closed before database activation', async ({ request }) => {
   const unauthorized = await request.post('/api/activation/launch');
   expect(unauthorized.status()).toBe(401);
-
-  const authorized = await request.post('/api/activation/launch', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-  });
+  const authorized = await request.post('/api/activation/launch', { headers: { authorization: 'Bearer mercury-e2e-cron-secret' } });
   expect(authorized.status()).toBe(503);
   const json = await authorized.json();
   expect(json.ok).toBe(false);
@@ -109,13 +106,9 @@ test('market provider fabric exposes failover state and protected pulling', asyn
   expect(statusJson.providers).toHaveLength(2);
   expect(statusJson.providers.map((item: { name: string }) => item.name)).toEqual(['massive', 'intrinio']);
   expect(statusJson.providers.every((item: { configured: boolean }) => item.configured === false)).toBeTruthy();
-
   const unauthorized = await request.post('/api/providers/market/pull');
   expect(unauthorized.status()).toBe(401);
-
-  const authorized = await request.post('/api/providers/market/pull', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-  });
+  const authorized = await request.post('/api/providers/market/pull', { headers: { authorization: 'Bearer mercury-e2e-cron-secret' } });
   expect(authorized.status()).toBe(503);
   const json = await authorized.json();
   expect(json.ok).toBe(false);
@@ -128,14 +121,9 @@ test('historical replay is visible, protected, and fail-closed without persisten
   const statusJson = await status.json();
   expect(statusJson.available).toBe(false);
   expect(statusJson.reason).toBe('database_not_configured');
-
   const unauthorized = await request.post('/api/research/history');
   expect(unauthorized.status()).toBe(401);
-
-  const authorized = await request.post('/api/research/history', {
-    headers: { authorization: 'Bearer mercury-e2e-cron-secret' },
-    data: { provider: 'auto' },
-  });
+  const authorized = await request.post('/api/research/history', { headers: { authorization: 'Bearer mercury-e2e-cron-secret' }, data: { provider: 'auto' } });
   expect(authorized.status()).toBe(503);
   const json = await authorized.json();
   expect(json.ok).toBe(false);
@@ -150,34 +138,28 @@ test('institutional research APIs are explicit and fail closed without persisten
   expect(signalsJson.capitalExecutionEnabled).toBe(false);
   expect(signalsJson.count).toBeGreaterThanOrEqual(25);
   expect(signalsJson.families.length).toBeGreaterThanOrEqual(10);
-
   const evidence = await request.get('/api/performance/evidence');
   expect(evidence.ok()).toBeTruthy();
   expect((await evidence.json()).available).toBe(false);
-
   const models = await request.get('/api/models/governance');
   expect(models.ok()).toBeTruthy();
   const modelJson = await models.json();
   expect(modelJson.available).toBe(false);
   expect(modelJson.capitalExecutionEnabled).toBe(false);
-
   const killSwitches = await request.get('/api/risk/kill-switches');
   expect(killSwitches.ok()).toBeTruthy();
   const killJson = await killSwitches.json();
   expect(killJson.capitalExecutionEnabled).toBe(false);
   expect(killJson.criticalTrips).toBeGreaterThan(0);
   expect(killJson.switches.some((item: { key: string; tripped: boolean }) => item.key === 'database' && item.tripped)).toBeTruthy();
-
   const portfolio = await request.get('/api/portfolio/shadow');
   expect(portfolio.ok()).toBeTruthy();
   const portfolioJson = await portfolio.json();
   expect(portfolioJson.available).toBe(false);
   expect(portfolioJson.reason).toBe('database_not_configured');
-
   const sources = await request.get('/api/research/source-reputation');
   expect(sources.ok()).toBeTruthy();
   expect((await sources.json()).available).toBe(false);
-
   const twinsMissing = await request.get('/api/research/twins');
   expect(twinsMissing.status()).toBe(400);
   const twins = await request.get('/api/research/twins?opportunityId=shadow-test');

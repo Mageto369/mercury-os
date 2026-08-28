@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { FlaskConical, RefreshCw, Search, Send } from "lucide-react";
+import { EmptyState } from "@/components/empty-state";
+import { useEmptyReason } from "@/components/system-state-provider";
 
 type Lab = {
   ok: boolean;
@@ -467,13 +469,10 @@ function Metric({ k, v }: { k: string; v: any }) {
   );
 }
 function DataTable({ rows, columns }: { rows: any[]; columns: string[] }) {
-  if (!rows.length)
-    return (
-      <div className="paper-empty">
-        <b>No live evidence rows</b>
-        <span>This view will populate as research evidence accumulates.</span>
-      </div>
-    );
+  // Research surfaces need matured outcomes, not just ingested rows, so an
+  // empty table here has a different cause than an empty market table.
+  const reason = useEmptyReason(rows.length, { requiresMaturity: true });
+  if (!rows.length) return <EmptyState reason={reason} />;
   return (
     <div className="table-scroll">
       <table className="command-table">

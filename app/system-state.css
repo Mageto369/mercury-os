@@ -1,0 +1,174 @@
+/* System state rail, honest empty states, and a density/accessibility pass.
+   Loaded after globals.css so these rules win where they overlap. */
+
+:root {
+  --rail-h: 38px;
+  --state-blocked: var(--red);
+  --state-waiting: var(--blue);
+  --state-ok: var(--green);
+}
+
+/* ---------- system state rail ---------- */
+
+.sys-rail {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  background: #070d18;
+  border-bottom: 1px solid var(--line);
+}
+
+.sys-rail-summary {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  min-height: var(--rail-h);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.sys-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--muted);
+}
+.sys-rail[data-posture='operational'] .sys-dot { background: var(--state-ok); box-shadow: 0 0 10px rgba(53, 210, 138, .55); }
+.sys-rail[data-posture='degraded'] .sys-dot { background: var(--amber); }
+.sys-rail[data-posture='awaiting-data'] .sys-dot { background: var(--blue); }
+.sys-rail[data-posture='not-configured'] .sys-dot { background: var(--amber); }
+.sys-rail[data-posture='unreachable'] .sys-dot { background: var(--red); }
+
+.sys-label {
+  font-size: 10px;
+  letter-spacing: .11em;
+  color: var(--text);
+  flex: none;
+}
+.sys-rail[data-posture='operational'] .sys-label { color: var(--green); }
+.sys-rail[data-posture='degraded'] .sys-label,
+.sys-rail[data-posture='not-configured'] .sys-label { color: var(--amber); }
+.sys-rail[data-posture='unreachable'] .sys-label { color: var(--red); }
+.sys-rail[data-posture='awaiting-data'] .sys-label { color: var(--blue); }
+
+.sys-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sys-facts {
+  display: flex;
+  gap: 14px;
+  flex: none;
+  font-size: 10px;
+  letter-spacing: .05em;
+  font-variant-numeric: tabular-nums;
+}
+.sys-facts b { color: var(--text); margin-left: 5px; }
+.sys-locked { color: var(--amber) !important; }
+
+.sys-count {
+  flex: none;
+  min-width: 17px;
+  height: 17px;
+  border-radius: 99px;
+  display: grid;
+  place-items: center;
+  background: var(--amber);
+  color: #14100a;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.sys-rail-detail {
+  border-top: 1px solid var(--line);
+  padding: 12px 16px 14px;
+  background: #060b14;
+}
+.sys-blockers { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.sys-blockers li {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  background: #0a1220;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--amber);
+  border-radius: 6px;
+}
+.sys-blockers b { font-size: 11px; color: var(--text); }
+.sys-blockers span { font-size: 11px; color: var(--muted); line-height: 1.5; }
+.sys-clear { margin: 0; font-size: 11px; color: var(--green); }
+.sys-checked { margin: 10px 0 0; font-size: 10px; color: var(--muted); letter-spacing: .04em; }
+
+/* The sidebar sits below the rail rather than under it. */
+.sidebar2 { top: var(--rail-h); height: calc(100vh - var(--rail-h)); }
+.app-shell { min-height: calc(100vh - var(--rail-h)); }
+
+@media (max-width: 900px) {
+  .sys-facts { display: none; }
+  .sys-detail { white-space: normal; }
+}
+
+/* ---------- empty states ---------- */
+
+.empty-state {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  padding: 14px 15px;
+  margin-top: 10px;
+  background: #0a1220;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.empty-state-mark {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  flex: none;
+  background: var(--muted);
+}
+.empty-state[data-tone='blocked'] .empty-state-mark { background: var(--red); }
+.empty-state[data-tone='waiting'] .empty-state-mark { background: var(--blue); }
+.empty-state-body { display: grid; gap: 4px; min-width: 0; }
+.empty-state-body b { font-size: 12px; color: var(--text); }
+.empty-state-body span { font-size: 11px; color: var(--muted); line-height: 1.55; }
+.empty-state-hint { color: var(--blue) !important; }
+
+/* ---------- density and legibility ---------- */
+
+/* Figures that sit in columns must not jitter between renders. */
+.command-table td,
+.kpi strong,
+.metric-row b,
+.paper-metrics b,
+.sys-facts,
+.factor-grid2 b {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Keyboard operation was previously invisible. */
+:where(button, a, select, input, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+  }
+}

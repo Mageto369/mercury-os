@@ -4,6 +4,9 @@ import "./mobile.css";
 import "./autonomy.css";
 import "./live-warehouse.css";
 import "./agents.css";
+import "./system-state.css";
+import { SystemStateRail } from "@/components/system-state-rail";
+import { SystemStateProvider } from "@/components/system-state-provider";
 
 export const metadata: Metadata = {
   title: "Mercury OS | Microcap Alpha Intelligence",
@@ -11,5 +14,5 @@ export const metadata: Metadata = {
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  return <html lang="en"><body>{children}</body></html>;
+  return <html lang="en"><body><SystemStateProvider><SystemStateRail />{children}</SystemStateProvider></body></html>;
 }

@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getDb } from '@/lib/db';
 import { securities } from '@/lib/db/schema';
+import { requireBearerSecret } from '@/lib/security/request-auth';
 
 export const runtime = 'nodejs';
 
@@ -29,11 +30,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const auth = request.headers.get('authorization');
-  const secret = process.env.CRON_SECRET;
-  if (secret && auth !== `Bearer ${secret}`) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
+  const access = requireBearerSecret(request, process.env.CRON_SECRET);
+  if (!access.ok) return NextResponse.json({ ok: false, error: access.reason }, { status: access.status });
 
   const parsed = securitySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {

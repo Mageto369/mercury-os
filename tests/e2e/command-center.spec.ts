@@ -121,7 +121,16 @@ test('shadow APIs, ingestion boundaries and cron remain safe without providers',
   const healthJson = await health.json();
   expect(healthJson.status).toBe('ok');
   expect(healthJson.service).toBe('mercury-os');
-  expect(healthJson.totalProviders).toBe(9);
+  expect(healthJson.version).toBe('0.4.0');
+  expect(healthJson.totalProviders).toBe(13);
+  expect(healthJson.runtime.mode).toBe('shadow');
+  expect(healthJson.runtime.capitalExecutionEnabled).toBe(false);
+  expect(healthJson.runtime.databaseConfigured).toBe(false);
+  expect(healthJson.runtime.databaseReachable).toBe(false);
+  expect(healthJson.runtime.schemaReady).toBe(false);
+  expect(healthJson.requiredRuntimeReady).toBe(false);
+  expect(healthJson.warehouse.liveSecurities).toBe(0);
+  expect(healthJson.warehouse.liveOpportunities).toBe(0);
 
   const autonomy = await request.get('/api/autonomy/status');
   expect(autonomy.ok()).toBeTruthy();

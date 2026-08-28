@@ -1,110 +1,19 @@
 'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import { Activity, FlaskConical, RefreshCw, ShieldCheck } from 'lucide-react';
-
-type PaperOrder = {
-  id: string;
-  symbol: string;
-  market?: string | null;
-  side: string;
-  requested_qty: string | number;
-  filled_qty: string | number;
-  requested_price?: string | number | null;
-  average_fill_price?: string | number | null;
-  status: string;
-  latency_ms?: number | null;
-  slippage_bps?: string | number | null;
-  reject_reason?: string | null;
-  created_at: string;
-};
-
-type TerminalData = {
-  ok: boolean;
-  mode: 'paper';
-  capitalExecutionEnabled: false;
-  brokerConnected?: false;
-  evidenceScope?: string;
-  error?: string;
-  summary: { orders: number; filled: number; rejected: number; open: number };
-  orders: PaperOrder[];
-  latestPortfolioDecision?: Record<string, unknown> | null;
-  account?: { available: boolean; reason?: string; nextFeature?: number };
-};
-
-export function PaperTradingTerminal() {
-  const [data, setData] = useState<TerminalData | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<'overview'|'orders'|'risk'>('overview');
-
-  async function load() {
-    setLoading(true); setError('');
-    try {
-      const response = await fetch('/api/paper/terminal', { cache: 'no-store' });
-      const body = await response.json().catch(() => ({}));
-      setData(body as TerminalData);
-      if (!response.ok) setError(body.error ?? `HTTP ${response.status}`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Paper terminal failed to load');
-    } finally { setLoading(false); }
-  }
-
-  useEffect(() => { void load(); }, []);
-  const orders = data?.orders ?? [];
-  const statusTone = (status:string) => status === 'rejected' ? 'danger' : ['filled','simulated'].includes(status) ? 'good' : 'warn';
-  const recent = useMemo(() => orders.slice(0, 12), [orders]);
-
-  return <div className="paper-terminal">
-    <section className="paper-hero surface">
-      <div>
-        <div className="eyebrow">Mercury execution research</div>
-        <h1>Paper Trading Terminal</h1>
-        <p>Simulated execution only. No brokerage connection and no real capital authority.</p>
-      </div>
-      <div className="paper-mode-badge"><FlaskConical size={16}/><div><b>PAPER MODE</b><small>REAL CAPITAL LOCKED</small></div></div>
-    </section>
-
-    <section className="paper-kpis">
-      <div className="kpi"><span>Paper Orders</span><strong>{loading ? '…' : data?.summary?.orders ?? 0}</strong><small>live-only evidence</small></div>
-      <div className="kpi"><span>Filled / Simulated</span><strong className="good">{loading ? '…' : data?.summary?.filled ?? 0}</strong><small>research ledger</small></div>
-      <div className="kpi"><span>Open</span><strong className="warn">{loading ? '…' : data?.summary?.open ?? 0}</strong><small>pending simulation</small></div>
-      <div className="kpi"><span>Rejected</span><strong className={data?.summary?.rejected ? 'danger' : ''}>{loading ? '…' : data?.summary?.rejected ?? 0}</strong><small>risk/execution rejects</small></div>
-      <div className="kpi"><span>Broker</span><strong className="warn">OFF</strong><small>not connected</small></div>
-      <div className="kpi"><span>Capital</span><strong className="warn">LOCKED</strong><small>execution disabled</small></div>
-    </section>
-
-    <div className="paper-toolbar">
-      <div className="admin-tabs">
-        {(['overview','orders','risk'] as const).map(item => <button key={item} className={tab===item?'active':''} onClick={()=>setTab(item)}>{item[0].toUpperCase()+item.slice(1)}</button>)}
-      </div>
-      <button className="icon-button" onClick={()=>void load()} aria-label="Refresh paper trading"><RefreshCw size={16} className={loading?'spin':''}/></button>
-    </div>
-
-    {error && <div className="surface paper-warning"><b className="danger">Terminal warning:</b> {error}</div>}
-
-    {tab==='overview' && <div className="paper-grid">
-      <section className="surface paper-panel">
-        <div className="section-head"><div><h2>Virtual Account</h2><p>Feature 2 in the build sequence.</p></div><Activity size={17}/></div>
-        <div className="paper-empty"><b>Account ledger not enabled yet</b><span>Starting capital, cash, buying power, equity and P&amp;L will be added next. This terminal intentionally does not invent balances.</span></div>
-      </section>
-      <section className="surface paper-panel">
-        <div className="section-head"><div><h2>Execution Boundary</h2><p>Current safety and evidence state.</p></div><ShieldCheck size={17}/></div>
-        <div className="paper-facts"><div><span>Mode</span><b>PAPER</b></div><div><span>Broker connection</span><b>NONE</b></div><div><span>Capital execution</span><b>DISABLED</b></div><div><span>Evidence scope</span><b>{data?.evidenceScope ?? 'LIVE-ONLY'}</b></div></div>
-      </section>
-      <section className="surface paper-panel paper-wide">
-        <div className="section-head"><div><h2>Recent Paper Activity</h2><p>Most recent non-validation paper-order records.</p></div></div>
-        <OrderTable orders={recent} statusTone={statusTone}/>
-      </section>
-    </div>}
-
-    {tab==='orders' && <section className="surface paper-panel"><div className="section-head"><div><h2>Paper Order Ledger</h2><p>Read-only in Feature 1. Order entry arrives as Feature 3.</p></div></div><OrderTable orders={orders} statusTone={statusTone}/></section>}
-
-    {tab==='risk' && <div className="paper-grid"><section className="surface paper-panel"><h2>Risk Controls</h2><div className="paper-facts"><div><span>Real orders</span><b>BLOCKED</b></div><div><span>Broker routing</span><b>DISABLED</b></div><div><span>Validation rows</span><b>EXCLUDED</b></div><div><span>Promotion</span><b>EVIDENCE-GATED</b></div></div></section><section className="surface paper-panel"><h2>Latest Portfolio Decision</h2>{data?.latestPortfolioDecision?<pre className="report-json">{JSON.stringify(data.latestPortfolioDecision,null,2)}</pre>:<div className="paper-empty"><b>No portfolio decision yet</b><span>Mercury has not recorded a live shadow portfolio decision.</span></div>}</section></div>}
-  </div>;
-}
-
-function OrderTable({orders,statusTone}:{orders:PaperOrder[];statusTone:(status:string)=>string}) {
-  if (!orders.length) return <div className="paper-empty"><b>No paper orders yet</b><span>The terminal is connected to the ledger, but no live paper-order records exist.</span></div>;
-  return <div className="table-scroll"><table className="command-table paper-orders"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Requested</th><th>Filled</th><th>Req. Price</th><th>Fill Price</th><th>Slippage</th><th>Latency</th><th>Status</th></tr></thead><tbody>{orders.map(order=><tr key={order.id}><td>{new Date(order.created_at).toLocaleString()}</td><td><b>{order.symbol}</b><small>{order.market ?? '—'}</small></td><td>{order.side}</td><td>{Number(order.requested_qty).toLocaleString()}</td><td>{Number(order.filled_qty).toLocaleString()}</td><td>{order.requested_price == null ? '—' : `$${Number(order.requested_price).toFixed(4)}`}</td><td>{order.average_fill_price == null ? '—' : `$${Number(order.average_fill_price).toFixed(4)}`}</td><td>{order.slippage_bps == null ? '—' : `${Number(order.slippage_bps).toFixed(2)} bps`}</td><td>{order.latency_ms == null ? '—' : `${order.latency_ms} ms`}</td><td><span className={`badge ${statusTone(order.status)}`}>{order.status.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>;
-}
+import { useEffect,useMemo,useState } from 'react';
+import { Activity,FlaskConical,RefreshCw,ShieldCheck } from 'lucide-react';
+type PaperOrder={id:string;symbol:string;market?:string|null;side:string;requested_qty:string|number;filled_qty:string|number;requested_price?:string|number|null;average_fill_price?:string|number|null;status:string;latency_ms?:number|null;slippage_bps?:string|number|null;created_at:string};
+type Position={id:string;symbol:string;market:string;quantity:number;averageCost:number;markPrice:number;marketValue:number;costBasis:number;unrealizedPnl:number;marked_at?:string|null};
+type Account={name:string;startingCapital:number;cash:number;buyingPower:number;equity:number;marketValue:number;grossExposure:number;realizedPnl:number;unrealizedPnl:number;totalPnl:number;totalReturnPct:number;positions:Position[];capitalExecutionEnabled:false};
+type TerminalData={ok:boolean;mode:'paper';capitalExecutionEnabled:false;brokerConnected?:false;evidenceScope?:string;error?:string;summary:{orders:number;filled:number;rejected:number;open:number};orders:PaperOrder[];latestPortfolioDecision?:Record<string,unknown>|null;account?:Account|null};
+const money=(v:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:2}).format(v);
+export function PaperTradingTerminal(){const[data,setData]=useState<TerminalData|null>(null);const[error,setError]=useState('');const[loading,setLoading]=useState(true);const[tab,setTab]=useState<'overview'|'positions'|'orders'|'risk'>('overview');async function load(){setLoading(true);setError('');try{const r=await fetch('/api/paper/terminal',{cache:'no-store'});const b=await r.json().catch(()=>({}));setData(b as TerminalData);if(!r.ok)setError(b.error??`HTTP ${r.status}`)}catch(e){setError(e instanceof Error?e.message:'Paper terminal failed to load')}finally{setLoading(false)}}useEffect(()=>{void load()},[]);const orders=data?.orders??[];const account=data?.account;const recent=useMemo(()=>orders.slice(0,12),[orders]);const tone=(s:string)=>s==='rejected'?'danger':['filled','simulated'].includes(s)?'good':'warn';return <div className="paper-terminal">
+<section className="paper-hero surface"><div><div className="eyebrow">Mercury execution research</div><h1>Paper Trading Terminal</h1><p>Persistent virtual account and simulated execution. No brokerage connection or real capital authority.</p></div><div className="paper-mode-badge"><FlaskConical size={16}/><div><b>PAPER MODE</b><small>REAL CAPITAL LOCKED</small></div></div></section>
+<section className="paper-kpis"><div className="kpi"><span>Equity</span><strong>{loading?'…':account?money(account.equity):'—'}</strong><small>virtual account</small></div><div className="kpi"><span>Cash / Buying Power</span><strong>{loading?'…':account?money(account.cash):'—'}</strong><small>{account?money(account.buyingPower):'not available'}</small></div><div className="kpi"><span>Total P&amp;L</span><strong className={(account?.totalPnl??0)>=0?'good':'danger'}>{loading?'…':account?money(account.totalPnl):'—'}</strong><small>{account?`${account.totalReturnPct.toFixed(2)}%`:'—'}</small></div><div className="kpi"><span>Exposure</span><strong>{loading?'…':account?money(account.grossExposure):'—'}</strong><small>{account?.positions.length??0} positions</small></div><div className="kpi"><span>Paper Orders</span><strong>{loading?'…':data?.summary.orders??0}</strong><small>{data?.summary.rejected??0} rejected</small></div><div className="kpi"><span>Capital</span><strong className="warn">LOCKED</strong><small>broker off</small></div></section>
+<div className="paper-toolbar"><div className="admin-tabs">{(['overview','positions','orders','risk'] as const).map(i=><button key={i} className={tab===i?'active':''} onClick={()=>setTab(i)}>{i[0].toUpperCase()+i.slice(1)}</button>)}</div><button className="icon-button" onClick={()=>void load()} aria-label="Refresh paper trading"><RefreshCw size={16} className={loading?'spin':''}/></button></div>{error&&<div className="surface paper-warning"><b className="danger">Terminal warning:</b> {error}</div>}
+{tab==='overview'&&<div className="paper-grid"><section className="surface paper-panel"><div className="section-head"><div><h2>Virtual Account</h2><p>Persistent paper ledger; initialized once at $100,000.</p></div><Activity size={17}/></div>{account?<div className="paper-facts"><div><span>Starting capital</span><b>{money(account.startingCapital)}</b></div><div><span>Equity</span><b>{money(account.equity)}</b></div><div><span>Realized P&amp;L</span><b>{money(account.realizedPnl)}</b></div><div><span>Unrealized P&amp;L</span><b>{money(account.unrealizedPnl)}</b></div></div>:<Empty text="Account unavailable until migration 011 is applied."/>}</section><section className="surface paper-panel"><div className="section-head"><div><h2>Execution Boundary</h2><p>Safety state.</p></div><ShieldCheck size={17}/></div><div className="paper-facts"><div><span>Mode</span><b>PAPER</b></div><div><span>Broker</span><b>NONE</b></div><div><span>Capital execution</span><b>DISABLED</b></div><div><span>Evidence</span><b>{data?.evidenceScope??'LIVE-ONLY'}</b></div></div></section><section className="surface paper-panel paper-wide"><div className="section-head"><div><h2>Recent Paper Activity</h2><p>Non-validation records only.</p></div></div><OrderTable orders={recent} tone={tone}/></section></div>}
+{tab==='positions'&&<section className="surface paper-panel"><div className="section-head"><div><h2>Virtual Positions</h2><p>Marked to the latest warehouse snapshot; average cost is used if a mark is unavailable.</p></div></div><PositionTable positions={account?.positions??[]}/></section>}
+{tab==='orders'&&<section className="surface paper-panel"><div className="section-head"><div><h2>Paper Order Ledger</h2><p>Read-only until Feature 3 order entry.</p></div></div><OrderTable orders={orders} tone={tone}/></section>}
+{tab==='risk'&&<div className="paper-grid"><section className="surface paper-panel"><h2>Risk Controls</h2><div className="paper-facts"><div><span>Real orders</span><b>BLOCKED</b></div><div><span>Broker routing</span><b>DISABLED</b></div><div><span>Validation rows</span><b>EXCLUDED</b></div><div><span>Promotion</span><b>EVIDENCE-GATED</b></div></div></section><section className="surface paper-panel"><h2>Latest Portfolio Decision</h2>{data?.latestPortfolioDecision?<pre className="report-json">{JSON.stringify(data.latestPortfolioDecision,null,2)}</pre>:<Empty text="No live shadow portfolio decision recorded."/>}</section></div>}</div>}
+function Empty({text}:{text:string}){return <div className="paper-empty"><b>No data yet</b><span>{text}</span></div>}
+function PositionTable({positions}:{positions:Position[]}){if(!positions.length)return <Empty text="No virtual positions exist yet."/>;return <div className="table-scroll"><table className="command-table"><thead><tr><th>Symbol</th><th>Qty</th><th>Avg Cost</th><th>Mark</th><th>Cost Basis</th><th>Market Value</th><th>Unrealized P&amp;L</th></tr></thead><tbody>{positions.map(p=><tr key={p.id}><td><b>{p.symbol}</b><small>{p.market}</small></td><td>{p.quantity.toLocaleString()}</td><td>{money(p.averageCost)}</td><td>{money(p.markPrice)}</td><td>{money(p.costBasis)}</td><td>{money(p.marketValue)}</td><td className={p.unrealizedPnl>=0?'good':'danger'}>{money(p.unrealizedPnl)}</td></tr>)}</tbody></table></div>}
+function OrderTable({orders,tone}:{orders:PaperOrder[];tone:(s:string)=>string}){if(!orders.length)return <Empty text="The ledger is connected, but no live paper-order records exist."/>;return <div className="table-scroll"><table className="command-table paper-orders"><thead><tr><th>Time</th><th>Symbol</th><th>Side</th><th>Requested</th><th>Filled</th><th>Req. Price</th><th>Fill Price</th><th>Slippage</th><th>Latency</th><th>Status</th></tr></thead><tbody>{orders.map(o=><tr key={o.id}><td>{new Date(o.created_at).toLocaleString()}</td><td><b>{o.symbol}</b><small>{o.market??'—'}</small></td><td>{o.side}</td><td>{Number(o.requested_qty).toLocaleString()}</td><td>{Number(o.filled_qty).toLocaleString()}</td><td>{o.requested_price==null?'—':money(Number(o.requested_price))}</td><td>{o.average_fill_price==null?'—':money(Number(o.average_fill_price))}</td><td>{o.slippage_bps==null?'—':`${Number(o.slippage_bps).toFixed(2)} bps`}</td><td>{o.latency_ms==null?'—':`${o.latency_ms} ms`}</td><td><span className={`badge ${tone(o.status)}`}>{o.status.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>}

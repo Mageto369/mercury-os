@@ -172,3 +172,16 @@
     transition-duration: .001ms !important;
   }
 }
+
+/* A caveat shown beside real data, not an absence of it. */
+.evidence-note {
+  margin-top: 12px;
+  padding: 11px 13px;
+  background: #0a1220;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--amber);
+  border-radius: 7px;
+}
+.evidence-note b { font-size: 11px; color: var(--amber); }
+.evidence-note ul { margin: 7px 0 0; padding-left: 17px; display: grid; gap: 5px; }
+.evidence-note li { font-size: 11px; color: var(--muted); line-height: 1.55; }

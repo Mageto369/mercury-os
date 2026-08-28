@@ -31,6 +31,11 @@ const COPY: Record<EmptyReason, { title: string; body: string; tone: 'blocked' |
     body: 'Opportunities exist but none have matured yet. Horizons resolve against real elapsed market time and cannot be accelerated.',
     tone: 'waiting',
   },
+  'awaiting-input': {
+    title: 'Waiting on a selection',
+    body: 'This panel renders once you choose what it should analyse. Nothing is wrong with the pipeline.',
+    tone: 'neutral',
+  },
   'no-match': {
     title: 'No rows match',
     body: 'Data exists for this surface, but nothing matches the current selection. Widen the filter to see rows.',

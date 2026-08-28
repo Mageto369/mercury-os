@@ -182,6 +182,7 @@ export type EmptyReason =
   | 'unreachable'
   | 'awaiting-ingestion'
   | 'awaiting-maturity'
+  | 'awaiting-input'
   | 'no-match'
   | 'none';
 

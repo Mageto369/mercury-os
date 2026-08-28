@@ -370,21 +370,22 @@ export function ResearchProofLab() {
                 />
                 <Metric k="Authority" v="RESEARCH ONLY" />
               </div>
-              <div className="paper-empty">
+              <div className="evidence-note" role="note">
                 <b>Evidence limitations</b>
-                <span>{(data.monteCarlo.limitations ?? []).join(" ")}</span>
+                <ul>
+                  {(data.monteCarlo.limitations ?? []).map((limitation: string) => (
+                    <li key={limitation}>{limitation}</li>
+                  ))}
+                </ul>
               </div>
             </>
           ) : (
-            <div className="paper-empty">
-              <b>Monte Carlo unavailable</b>
-              <span>
-                {data?.monteCarlo?.reason ?? "No live outcomes."}{" "}
-                {Number(data?.monteCarlo?.sourceObservations ?? 0)} of{" "}
-                {Number(data?.monteCarlo?.minimumSourceObservations ?? 100)}
-                {" required observations."}
-              </span>
-            </div>
+            <EmptyState
+              reason="awaiting-maturity"
+              title="Insufficient evidence — no percentiles reported"
+              body={`${Number(data?.monteCarlo?.sourceObservations ?? 0)} of ${Number(data?.monteCarlo?.minimumSourceObservations ?? 100)} required matured live observations. A bootstrap cannot manufacture information that is not in the sample.`}
+              hint={data?.monteCarlo?.reason ?? undefined}
+            />
           )}
         </section>
       )}
@@ -447,13 +448,11 @@ export function ResearchProofLab() {
               />
             </>
           ) : (
-            <div className="paper-empty">
-              <b>No twins loaded</b>
-              <span>
-                Enter a live opportunity ID. Validation opportunities are
-                excluded.
-              </span>
-            </div>
+            <EmptyState
+              reason="awaiting-input"
+              title="No twins loaded"
+              body="Enter a live opportunity ID. Validation opportunities are excluded from twin matching."
+            />
           )}
         </section>
       )}

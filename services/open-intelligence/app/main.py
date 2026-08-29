@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, time, timedelta
 from hmac import compare_digest
-from datetime import date
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
+import holidays
 import httpx
-import pandas_market_calendars as mcal
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from holidays.constants import HALF_DAY, PUBLIC
 
 app = FastAPI(title="Mercury Open Intelligence Sidecar", version="1.0.0")
 
@@ -19,6 +21,9 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 SEC_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
 FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+US_EQUITY_EXCHANGES = {"NYSE", "NASDAQ", "XNYS", "XNAS", "NASD"}
+NEW_YORK = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
 
 _ticker_records: dict[str, dict[str, Any]] | None = None
 _cik_records: dict[str, dict[str, Any]] | None = None
@@ -255,7 +260,7 @@ def health() -> dict[str, Any]:
         "capitalExecutionEnabled": False,
         "repositories": {
             "httpx": package_version("httpx"),
-            "pandas-market-calendars": package_version("pandas-market-calendars"),
+            "holidays": package_version("holidays"),
         },
         "configured": {
             "edgar": bool(os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT")),
@@ -316,25 +321,36 @@ def equity_reference(symbol: str) -> dict[str, Any]:
 def market_calendar(exchange: str, start: date = Query(...), end: date = Query(...)) -> dict[str, Any]:
     if start > end:
         raise HTTPException(status_code=400, detail="invalid_date_range")
+    exchange_key = exchange.upper().strip()
+    if exchange_key not in US_EQUITY_EXCHANGES:
+        raise HTTPException(status_code=404, detail="calendar_not_supported")
     try:
-        calendar = mcal.get_calendar(exchange)
+        years = range(start.year, end.year + 1)
+        closed_days = holidays.financial_holidays("XNYS", years=years, categories=(PUBLIC,))
+        half_days = holidays.financial_holidays("XNYS", years=years, categories=(HALF_DAY,))
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"calendar_not_found:{exc}") from exc
-    schedule = calendar.schedule(start_date=start, end_date=end, tz="UTC")
-    early = set(calendar.early_closes(schedule).index.strftime("%Y-%m-%d"))
-    sessions = []
-    for session_date, row in schedule.iterrows():
-        key = session_date.strftime("%Y-%m-%d")
+
+    sessions: list[dict[str, Any]] = []
+    session_date = start
+    while session_date <= end:
+        if session_date.weekday() >= 5 or session_date in closed_days:
+            session_date += timedelta(days=1)
+            continue
+        early_close = session_date in half_days
+        open_at = datetime.combine(session_date, time(9, 30), tzinfo=NEW_YORK).astimezone(UTC)
+        close_at = datetime.combine(session_date, time(13 if early_close else 16, 0), tzinfo=NEW_YORK).astimezone(UTC)
         sessions.append({
-            "sessionDate": key,
-            "openAt": row["market_open"].isoformat(),
-            "closeAt": row["market_close"].isoformat(),
-            "earlyClose": key in early,
+            "sessionDate": session_date.isoformat(),
+            "openAt": open_at.isoformat(),
+            "closeAt": close_at.isoformat(),
+            "earlyClose": early_close,
         })
+        session_date += timedelta(days=1)
     return {
         "exchange": exchange,
         "sessions": sessions,
-        "source": "pandas-market-calendars",
+        "source": "python-holidays:xnys",
         "evidenceClass": "reference",
         "mode": "shadow",
         "capitalExecutionEnabled": False,

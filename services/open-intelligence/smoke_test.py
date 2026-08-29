@@ -95,6 +95,18 @@ assert calendar['exchange'] == 'NYSE'
 assert len(calendar['sessions']) > 0
 assert calendar['capitalExecutionEnabled'] is False
 
+thanksgiving = market_calendar('NASDAQ', date(2026, 11, 26), date(2026, 11, 27))
+assert [session['sessionDate'] for session in thanksgiving['sessions']] == ['2026-11-27']
+assert thanksgiving['sessions'][0]['earlyClose'] is True
+assert thanksgiving['sessions'][0]['closeAt'] == '2026-11-27T18:00:00+00:00'
+
+try:
+    market_calendar('UNSUPPORTED', date(2026, 1, 2), date(2026, 1, 9))
+except HTTPException as exc:
+    assert exc.status_code == 404 and exc.detail == 'calendar_not_supported'
+else:
+    raise AssertionError('Unsupported calendars must fail explicitly')
+
 try:
     configure_edgar()
 except HTTPException as exc:

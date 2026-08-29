@@ -5,7 +5,7 @@ import { routeOperationalAlert } from '@/lib/alerts/router';
 import { getSql } from '@/lib/db';
 import { clampSimulatedFillPrice, simulateExecution } from '@/lib/execution/simulator';
 import { DEFAULT_PAPER_ACCOUNT_ID, ensurePaperAccount } from '@/lib/paper/account';
-import { reservedCashFor } from '@/lib/paper/order-engine';
+import { reservedCashFor, toLedgerAmount } from '@/lib/paper/order-engine';
 import { adminAuthorized, sameOriginMutation } from '@/lib/admin/security';
 import { toJsonb } from '@/lib/db/json';
 
@@ -142,13 +142,15 @@ export async function POST(request: Request) {
         const newQty = currentQty + input.quantity;
         const newAvg = newQty > 0 ? ((currentQty * currentAvg) + (input.quantity * fillPrice)) / newQty : 0;
         await tx`insert into paper_positions(id,account_id,security_id,quantity,average_cost,realized_pnl) values(${`pos:${DEFAULT_PAPER_ACCOUNT_ID}:${security.id}`},${DEFAULT_PAPER_ACCOUNT_ID},${security.id},${newQty},${newAvg},0) on conflict(account_id,security_id) do update set quantity=${newQty},average_cost=${newAvg},updated_at=now()`;
-        await tx`update paper_accounts set cash=cash-${input.quantity * fillPrice + feeAmount},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+        // Rounded to the ledger's precision so the balance stays exactly
+        // reconstructible from the order rows across many fills.
+        await tx`update paper_accounts set cash=cash-${toLedgerAmount(input.quantity * fillPrice + feeAmount)},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       } else {
-        const proceeds = input.quantity * fillPrice;
-        const realized = (fillPrice - currentAvg) * input.quantity - feeAmount;
+        const proceeds = toLedgerAmount(input.quantity * fillPrice - feeAmount);
+        const realized = toLedgerAmount((fillPrice - currentAvg) * input.quantity - feeAmount);
         const newQty = currentQty - input.quantity;
         await tx`update paper_positions set quantity=${newQty},realized_pnl=realized_pnl+${realized},updated_at=now() where account_id=${DEFAULT_PAPER_ACCOUNT_ID} and security_id=${security.id}`;
-        await tx`update paper_accounts set cash=cash+${proceeds - feeAmount},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
+        await tx`update paper_accounts set cash=cash+${proceeds},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${DEFAULT_PAPER_ACCOUNT_ID}`;
       }
 
       await tx`insert into paper_orders(id,security_id,opportunity_id,side,requested_qty,filled_qty,requested_price,average_fill_price,status,order_type,time_in_force,fee_amount,latency_ms,slippage_bps,simulation,capital_execution_enabled,idempotency_key,request_fingerprint) values(${orderId},${security.id},${opportunity?.id ?? null},${input.side},${input.quantity},${input.quantity},${requestedPrice},${fillPrice},'filled',${input.orderType},${input.timeInForce},${feeAmount},0,${simulation.estimatedOneWayCostBps},${toJsonb({...simulation,referencePrice,fillPrice,commissionBps,capitalExecutionEnabled:false,brokerConnected:false})}::jsonb,false,${idempotencyKey},${requestFingerprint})`;

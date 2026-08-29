@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { crossesLimit, dayOrderExpired, OPEN_STATUSES } from '../../lib/paper/order-engine';
+import { crossesLimit, dayOrderExpired, LEDGER_DECIMALS, OPEN_STATUSES, toLedgerAmount } from '../../lib/paper/order-engine';
 import { clampSimulatedFillPrice } from '../../lib/execution/simulator';
 
 test.describe('resting limit order crossing', () => {
@@ -51,4 +51,28 @@ test('the cancellable statuses and the resting statuses are the same set', () =>
   // The cancel route and the settlement sweep must agree on what "resting"
   // means, or an order could be settled after it was cancelled.
   expect([...OPEN_STATUSES]).toEqual(['open', 'pending', 'partially_filled']);
+});
+
+test.describe('ledger precision', () => {
+  test('amounts are rounded to the precision the ledger actually stores', () => {
+    expect(LEDGER_DECIMALS).toBe(4);
+    expect(toLedgerAmount(326.66651679999994)).toBe(326.6665);
+    expect(toLedgerAmount(0.00005)).toBe(0.0001);
+    expect(toLedgerAmount(-1.120954)).toBe(-1.1210);
+    expect(toLedgerAmount(100)).toBe(100);
+  });
+
+  test('a run of fills stays exactly reconstructible from the rounded amounts', () => {
+    // Letting Postgres round each full-precision update instead lost a fraction
+    // of a cent per fill, so the balance drifted from the order rows.
+    const fills = Array.from({ length: 12 }, () => 300 * 26.11825792);
+    let cash = 100000;
+    let audited = 100000;
+    for (const fill of fills) {
+      const amount = toLedgerAmount(fill);
+      cash = toLedgerAmount(cash - amount);
+      audited -= amount;
+    }
+    expect(cash).toBe(toLedgerAmount(audited));
+  });
 });

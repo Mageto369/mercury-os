@@ -50,6 +50,18 @@ export async function reservedCashFor(tx: Tx) {
   return Number(row?.reserved ?? 0);
 }
 
+/**
+ * Cash and realised P&L are stored at four decimal places. Rounding the amount
+ * before it is applied keeps the balance exactly reconstructible from the order
+ * rows: letting Postgres round each full-precision update instead accumulated a
+ * fraction of a cent per fill, so an auditor recomputing the ledger from the
+ * fills disagreed with the balance after a dozen trades.
+ */
+export const LEDGER_DECIMALS = 4;
+export function toLedgerAmount(value: number) {
+  return Number(value.toFixed(LEDGER_DECIMALS));
+}
+
 /** Apply a fill to positions, cash and realised P&L. Returns the realised amount. */
 async function applyFillToBook(tx: Tx, params: {
   accountId: string;
@@ -65,14 +77,15 @@ async function applyFillToBook(tx: Tx, params: {
   if (side === 'buy') {
     const newQty = currentQty + quantity;
     const newAvg = newQty > 0 ? ((currentQty * currentAvg) + (quantity * fillPrice)) / newQty : 0;
+    const cost = toLedgerAmount(quantity * fillPrice + feeAmount);
     await tx`insert into paper_positions(id,account_id,security_id,quantity,average_cost,realized_pnl) values(${`pos:${accountId}:${securityId}`},${accountId},${securityId},${newQty},${newAvg},0) on conflict(account_id,security_id) do update set quantity=${newQty},average_cost=${newAvg},updated_at=now()`;
-    await tx`update paper_accounts set cash=cash-${quantity * fillPrice + feeAmount},updated_at=now() where id=${accountId}`;
+    await tx`update paper_accounts set cash=cash-${cost},updated_at=now() where id=${accountId}`;
     return 0;
   }
-  const proceeds = quantity * fillPrice;
-  const realized = (fillPrice - currentAvg) * quantity - feeAmount;
+  const proceeds = toLedgerAmount(quantity * fillPrice - feeAmount);
+  const realized = toLedgerAmount((fillPrice - currentAvg) * quantity - feeAmount);
   await tx`update paper_positions set quantity=${currentQty - quantity},realized_pnl=realized_pnl+${realized},updated_at=now() where account_id=${accountId} and security_id=${securityId}`;
-  await tx`update paper_accounts set cash=cash+${proceeds - feeAmount},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${accountId}`;
+  await tx`update paper_accounts set cash=cash+${proceeds},realized_pnl=realized_pnl+${realized},updated_at=now() where id=${accountId}`;
   return realized;
 }
 

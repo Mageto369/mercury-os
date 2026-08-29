@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { getSql } from '@/lib/db';
 import { adminAuthorized, sameOriginMutation } from '@/lib/admin/security';
 import { toJsonb } from '@/lib/db/json';
@@ -22,6 +23,16 @@ export async function DELETE(request: Request, context: { params: Promise<{ id: 
       await tx`update paper_trade_journal set outcome=outcome || ${toJsonb({status:'cancelled'})}::jsonb,updated_at=now() where order_id=${id}`;
       return {status:200,body:{ok:true,orderId:id,status:'cancelled',capitalExecutionEnabled:false,brokerConnected:false}};
     });
+    if (result.status === 200) {
+      await routeOperationalAlert({
+        eventKey: `paper:${id}:cancelled`,
+        category: 'paper',
+        severity: 'high',
+        title: 'Paper order cancelled',
+        message: `${id} was cancelled in the virtual ledger.`,
+        payload: { orderId: id, status: 'cancelled', capitalExecutionEnabled: false },
+      });
+    }
     return NextResponse.json(result.body,{status:result.status});
   } catch(error){return NextResponse.json({ok:false,error:'paper_order_cancel_failed',detail:error instanceof Error?error.message:'unknown_error',capitalExecutionEnabled:false},{status:500});}
 }

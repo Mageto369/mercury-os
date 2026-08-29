@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 /**
  * Notification rule evaluation.
  *
@@ -166,7 +168,7 @@ export function resolveChannel(
   return { kind: 'http', channel, url: validated.url };
 }
 
-const PRIVATE_HOST = /^(localhost|127\.|0\.|10\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|\[?::1\]?$)/i;
+const INTERNAL_HOST_SUFFIX = /(^|\.)(localhost|local|internal|home\.arpa)\.?$/i;
 
 /**
  * Destinations are admin-editable, so they are an SSRF surface. This blocks the
@@ -187,7 +189,13 @@ export function validateDestination(raw: string): { ok: true; url: string } | { 
     }
   }
   if (url.username || url.password) return { ok: false, reason: 'destination_url_credentials_not_allowed' };
-  if (PRIVATE_HOST.test(url.hostname)) return { ok: false, reason: 'destination_private_host_not_allowed' };
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  // URL canonicalises integer, hexadecimal, and octal IPv4 forms before this
+  // check. Reject every IP literal, including IPv4-mapped and private IPv6,
+  // rather than maintaining an incomplete list of special address ranges.
+  if (isIP(hostname) !== 0 || INTERNAL_HOST_SUFFIX.test(hostname)) {
+    return { ok: false, reason: 'destination_private_host_not_allowed' };
+  }
   return { ok: true, url: url.toString() };
 }
 

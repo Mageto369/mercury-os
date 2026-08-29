@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, test } from '@playwright/test';
 import {
   conditionsMet,
@@ -9,6 +11,7 @@ import {
   validateDestination,
   type NotificationRule,
 } from '../../lib/alerts/rules';
+import { reportPersistedOutcomes } from '../../lib/alerts/router';
 
 const rule = (overrides: Partial<NotificationRule> = {}): NotificationRule => ({
   id: 'notification:test',
@@ -154,9 +157,15 @@ test.describe('destination validation', () => {
   });
 
   test('rejects private and loopback hosts', () => {
-    for (const host of ['http://localhost/x', 'https://127.0.0.1/x', 'https://10.0.0.5/x', 'https://192.168.1.9/x', 'https://169.254.169.254/latest']) {
+    for (const host of ['http://localhost/x', 'https://127.0.0.1/x', 'https://10.0.0.5/x', 'https://192.168.1.9/x', 'https://169.254.169.254/latest', 'https://[::1]/x', 'https://[::ffff:127.0.0.1]/x', 'https://[fc00::1]/x', 'https://foo.localhost/x', 'https://metadata.google.internal/x']) {
       const result = validateDestination(host);
       expect(result.ok, host).toBe(false);
+    }
+  });
+
+  test('rejects alternate IP literal encodings after URL canonicalisation', () => {
+    for (const host of ['https://2130706433/x', 'https://0x7f000001/x', 'https://0177.0.0.1/x']) {
+      expect(validateDestination(host).ok, host).toBe(false);
     }
   });
 
@@ -184,4 +193,44 @@ test.describe('cooldown', () => {
     expect(cooldownActive(null, 60, now)).toBe(false);
     expect(cooldownActive('not-a-date', 60, now)).toBe(false);
   });
+});
+
+test.describe('delivery evidence', () => {
+  const dashboardOutcome = {
+    ruleKey: 'pipeline_failure',
+    ruleName: 'Pipeline failure',
+    channel: 'dashboard',
+    destination: null,
+    status: 'delivered' as const,
+    reason: 'rendered_in_operations_center',
+    error: null,
+  };
+
+  test('dashboard success requires committed history', () => {
+    const [reported] = reportPersistedOutcomes([dashboardOutcome], false);
+    expect(reported.status).toBe('failed');
+    expect(reported.reason).toBe('dashboard_persistence_failed');
+  });
+
+  test('committed dashboard history remains delivered', () => {
+    const [reported] = reportPersistedOutcomes([dashboardOutcome], true);
+    expect(reported.status).toBe('delivered');
+  });
+});
+
+test('seeded rule categories have production call sites', () => {
+  const producers = [
+    ['lib/agents/supervisor.ts', 'operations'],
+    ['lib/workflows/opportunity-engine.ts', 'opportunity'],
+    ['lib/workflows/sec-filings.ts', 'filing'],
+    ['lib/workflows/share-structure.ts', 'risk'],
+    ['lib/workflows/model-learning.ts', 'model'],
+    ['app/api/paper/orders/route.ts', 'paper'],
+  ] as const;
+
+  for (const [relativePath, category] of producers) {
+    const source = fs.readFileSync(path.join(process.cwd(), relativePath), 'utf8');
+    expect(source, relativePath).toContain('routeOperationalAlert');
+    expect(source, relativePath).toMatch(new RegExp(`category:\\s*['\"]${category}['\"]`));
+  }
 });

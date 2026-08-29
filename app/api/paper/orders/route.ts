@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { getSql } from '@/lib/db';
 import { clampSimulatedFillPrice, simulateExecution } from '@/lib/execution/simulator';
 import { DEFAULT_PAPER_ACCOUNT_ID, ensurePaperAccount } from '@/lib/paper/account';
@@ -161,6 +162,24 @@ export async function POST(request: Request) {
 
       return { status:200, body:{ ok:true, orderId, status:'filled', symbol:security.symbol, side:input.side, quantity:input.quantity, fillPrice, feeAmount, simulation, capitalExecutionEnabled:false, brokerConnected:false } };
     });
+    if ('orderId' in result.body && !('idempotentReplay' in result.body)) {
+      await routeOperationalAlert({
+        eventKey: `paper:${String(result.body.orderId)}:${String(result.body.status ?? result.body.error ?? 'unknown')}`,
+        category: 'paper',
+        severity: 'high',
+        title: `${input.symbol} paper order ${String(result.body.status ?? 'rejected')}`,
+        message: `${input.side} ${input.quantity} ${input.symbol} remained simulation-only.`,
+        payload: {
+          orderId: result.body.orderId,
+          symbol: input.symbol,
+          side: input.side,
+          quantity: input.quantity,
+          status: result.body.status ?? 'rejected',
+          error: result.body.error,
+          capitalExecutionEnabled: false,
+        },
+      });
+    }
     return NextResponse.json(result.body, { status:result.status });
   } catch (error) {
     return NextResponse.json({ ok:false, error:'paper_order_failed', detail:error instanceof Error?error.message:'unknown_error', capitalExecutionEnabled:false }, { status:500 });

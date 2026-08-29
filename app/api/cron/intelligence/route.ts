@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { runSupervisor } from '@/lib/agents/supervisor';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { matureOpportunityOutcomes } from '@/lib/performance/outcomes';
 import { refreshSourceReputation } from '@/lib/research/source-reputation';
 import { buildShadowPortfolio } from '@/lib/portfolio/shadow-portfolio';
@@ -67,6 +68,25 @@ export async function GET(request: Request) {
   // Resting orders are the other half of the paper lifecycle: without this pass
   // an open limit order can never fill and a day order never expires.
   try { restingOrders = await settleRestingOrders(now); } catch (error) { restingOrders = { ok:false, reason:error instanceof Error ? error.message : 'resting_order_settlement_failed' }; }
+  if ('outcomes' in restingOrders) {
+    const transitioned = restingOrders.outcomes.filter((outcome) => outcome.action !== 'resting');
+    if (transitioned.length > 0) {
+      await routeOperationalAlert({
+        eventKey: `paper-settlement:${now.toISOString()}`,
+        category: 'paper',
+        severity: 'high',
+        title: 'Paper resting-order settlement',
+        message: `${restingOrders.filled} filled, ${restingOrders.expired} expired, and ${restingOrders.rejected} rejected in the virtual ledger.`,
+        payload: {
+          filled: restingOrders.filled,
+          expired: restingOrders.expired,
+          rejected: restingOrders.rejected,
+          orderIds: transitioned.map((outcome) => outcome.orderId),
+          capitalExecutionEnabled: false,
+        },
+      });
+    }
+  }
 
   return NextResponse.json({
     ok:true, mode:result.mode, autonomousExecution:false, capitalExecutionEnabled:false,

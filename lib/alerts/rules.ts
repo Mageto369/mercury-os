@@ -135,19 +135,44 @@ export function matchRule(rule: NotificationRule, event: AlertEvent): RuleMatch 
 export type ChannelResolution =
   | { kind: 'dashboard' }
   | { kind: 'http'; channel: 'slack' | 'webhook'; url: string }
+  | { kind: 'email'; url: string; apiKey: string; from: string; to: string }
   | { kind: 'unavailable'; reason: string };
+
+/** A recipient Mercury is willing to hand to a mail API. */
+export function validEmailAddress(value: string | null | undefined) {
+  const address = String(value ?? '').trim();
+  return /^[^\s@,;<>"]+@[^\s@,;<>"]+\.[A-Za-z]{2,}$/.test(address) ? address : null;
+}
+
+export interface AlertEnv {
+  alertWebhookUrl?: string | null;
+  emailApiUrl?: string | null;
+  emailApiKey?: string | null;
+  emailFrom?: string | null;
+}
 
 export function resolveChannel(
   rule: NotificationRule,
-  env: { alertWebhookUrl?: string | null } = {},
+  env: AlertEnv = {},
 ): ChannelResolution {
   const channel = String(rule.channel ?? 'dashboard') as AlertChannel;
 
   if (channel === 'dashboard') return { kind: 'dashboard' };
 
   if (channel === 'email') {
-    // There is no mail transport in Mercury. Saying anything else would be a lie.
-    return { kind: 'unavailable', reason: 'email_transport_not_implemented' };
+    // Mercury sends mail through an HTTP mail API rather than shipping an SMTP
+    // client. Without the key, the address or a sender there is nothing to send
+    // with, and the rule records `unavailable` rather than a fabricated success.
+    const apiKey = String(env.emailApiKey ?? '').trim();
+    if (!apiKey) return { kind: 'unavailable', reason: 'email_api_key_not_configured' };
+    const from = validEmailAddress(env.emailFrom);
+    if (!from) return { kind: 'unavailable', reason: 'email_sender_not_configured' };
+    const to = validEmailAddress(rule.destination);
+    if (!to) return { kind: 'unavailable', reason: 'email_recipient_not_configured' };
+    const url = String(env.emailApiUrl ?? 'https://api.resend.com/emails').trim();
+    const validated = validateDestination(url);
+    if (!validated.ok) return { kind: 'unavailable', reason: validated.reason };
+    return { kind: 'email', url: validated.url, apiKey, from, to };
   }
 
   const target = channel === 'slack'

@@ -55,10 +55,10 @@ function emptyResult(persisted: boolean, outcomes: DeliveryOutcome[] = []): Aler
   };
 }
 
-async function postJson(url: string, body: unknown) {
+async function postJson(url: string, body: unknown, headers: Record<string, string> = {}) {
   const response = await fetch(url, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(body),
     redirect: 'error',
     signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
@@ -156,7 +156,12 @@ export async function routeOperationalAlert(input: {
 
   for (const match of matches) {
     const rule = match.rule;
-    const resolution = resolveChannel(rule, { alertWebhookUrl: process.env.ALERT_WEBHOOK_URL });
+    const resolution = resolveChannel(rule, {
+      alertWebhookUrl: process.env.ALERT_WEBHOOK_URL,
+      emailApiUrl: process.env.ALERT_EMAIL_API_URL,
+      emailApiKey: process.env.ALERT_EMAIL_API_KEY,
+      emailFrom: process.env.ALERT_EMAIL_FROM,
+    });
 
     let lastDeliveredAt: string | null = null;
     try {
@@ -210,13 +215,27 @@ export async function routeOperationalAlert(input: {
       continue;
     }
 
+    const isEmail = resolution.kind === 'email';
+    const channelName = isEmail ? 'email' : resolution.channel;
+    // The recipient identifies an email delivery; the API endpoint does not.
+    const destination = isEmail ? resolution.to : resolution.url;
+
     try {
-      await postJson(resolution.url, basePayload);
+      if (isEmail) {
+        await postJson(resolution.url, {
+          from: resolution.from,
+          to: [resolution.to],
+          subject: `[Mercury ${event.severity}] ${event.title}`,
+          text: `${event.message}\n\nSeverity: ${event.severity}\nCategory: ${event.category}\nMode: shadow (real capital execution disabled)\nRule: ${rule.display_name} (${rule.rule_key})`,
+        }, { authorization: `Bearer ${resolution.apiKey}` });
+      } else {
+        await postJson(resolution.url, basePayload);
+      }
       outcomes.push({
         ruleKey: rule.rule_key,
         ruleName: rule.display_name,
-        channel: resolution.channel,
-        destination: resolution.url,
+        channel: channelName,
+        destination,
         status: 'delivered',
         reason: null,
         error: null,
@@ -225,8 +244,8 @@ export async function routeOperationalAlert(input: {
       outcomes.push({
         ruleKey: rule.rule_key,
         ruleName: rule.display_name,
-        channel: resolution.channel,
-        destination: resolution.url,
+        channel: channelName,
+        destination,
         status: 'failed',
         reason: 'transport_error',
         error: cause instanceof Error ? cause.message : 'unknown_delivery_error',

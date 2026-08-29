@@ -115,10 +115,42 @@ test.describe('channel resolution fails closed', () => {
     expect(resolveChannel(rule({ channel: 'dashboard' })).kind).toBe('dashboard');
   });
 
-  test('email has no transport and is reported unavailable, never delivered', () => {
+  test('email without an API key is unavailable, never delivered', () => {
     const resolved = resolveChannel(rule({ channel: 'email', destination: 'ops@example.com' }));
     expect(resolved.kind).toBe('unavailable');
-    expect(resolved.kind === 'unavailable' && resolved.reason).toBe('email_transport_not_implemented');
+    expect(resolved.kind === 'unavailable' && resolved.reason).toBe('email_api_key_not_configured');
+  });
+
+  test('email with a key but no sender is unavailable', () => {
+    const resolved = resolveChannel(rule({ channel: 'email', destination: 'ops@example.com' }), { emailApiKey: 'k' });
+    expect(resolved.kind === 'unavailable' && resolved.reason).toBe('email_sender_not_configured');
+  });
+
+  test('email with no recipient on the rule is unavailable', () => {
+    const resolved = resolveChannel(rule({ channel: 'email', destination: null }), { emailApiKey: 'k', emailFrom: 'mercury@example.com' });
+    expect(resolved.kind === 'unavailable' && resolved.reason).toBe('email_recipient_not_configured');
+  });
+
+  test('a malformed recipient is refused rather than handed to the mail API', () => {
+    for (const bad of ['ops@example', 'ops example.com', 'a@b.c,d@e.fg', '<ops@example.com>', '']) {
+      const resolved = resolveChannel(rule({ channel: 'email', destination: bad }), { emailApiKey: 'k', emailFrom: 'mercury@example.com' });
+      expect(resolved.kind === 'unavailable' && resolved.reason).toBe('email_recipient_not_configured');
+    }
+  });
+
+  test('a fully configured email channel resolves to a real transport', () => {
+    const resolved = resolveChannel(rule({ channel: 'email', destination: 'ops@example.com' }), { emailApiKey: 'k', emailFrom: 'mercury@example.com' });
+    expect(resolved.kind).toBe('email');
+    if (resolved.kind !== 'email') return;
+    expect(resolved.to).toBe('ops@example.com');
+    expect(resolved.from).toBe('mercury@example.com');
+    expect(resolved.url).toBe('https://api.resend.com/emails');
+  });
+
+  test('the mail endpoint itself is held to the destination rules', () => {
+    // A private-network mail endpoint is an SSRF target, not a mail server.
+    const resolved = resolveChannel(rule({ channel: 'email', destination: 'ops@example.com' }), { emailApiKey: 'k', emailFrom: 'mercury@example.com', emailApiUrl: 'https://127.0.0.1/emails' });
+    expect(resolved.kind).toBe('unavailable');
   });
 
   test('webhook without any configured URL is unavailable', () => {

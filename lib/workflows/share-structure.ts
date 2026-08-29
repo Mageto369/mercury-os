@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { desc, eq } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { securities, shareStructures, systemEvents } from '@/lib/db/schema';
 
 export interface ShareStructureChange {
@@ -98,6 +99,16 @@ export async function runShareStructureWorkflow(): Promise<ShareStructureWorkflo
         observedAt: current.observedAt,
       }).onConflictDoNothing({ target: systemEvents.eventKey }).returning({ id: systemEvents.id });
       eventsCreated += result.length;
+      if (result.length && riskScore >= 65) {
+        await routeOperationalAlert({
+          eventKey: `structure:${current.id}:${previous.id}`,
+          category: 'risk',
+          severity: 'critical',
+          title: `${current.symbol} critical dilution risk`,
+          message: `${current.symbol} share structure expansion crossed the critical risk threshold.`,
+          payload: { ...change, currentObservationId: current.id, previousObservationId: previous.id },
+        });
+      }
     }
   }
 

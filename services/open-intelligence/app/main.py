@@ -1,23 +1,32 @@
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, datetime, time, timedelta
 from hmac import compare_digest
-from datetime import date
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
+from xml.etree import ElementTree
+from zoneinfo import ZoneInfo
 
-import financedatabase as fd
-import pandas_market_calendars as mcal
-from edgar import Company, set_identity
+import holidays
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from fredapi import Fred
-from sec_cik_mapper import StockMapper
+from holidays.constants import HALF_DAY, PUBLIC
 
 app = FastAPI(title="Mercury Open Intelligence Sidecar", version="1.0.0")
 
-_mapper: StockMapper | None = None
-_equities: Any | None = None
+SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
+SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
+SEC_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
+FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+US_EQUITY_EXCHANGES = {"NYSE", "NASDAQ", "XNYS", "XNAS", "NASD"}
+NEW_YORK = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
+
+_ticker_records: dict[str, dict[str, Any]] | None = None
+_cik_records: dict[str, dict[str, Any]] | None = None
 
 
 def sidecar_access(authorization: str | None) -> tuple[bool, int, str | None]:
@@ -70,25 +79,176 @@ def normalize_record(record: Any) -> dict[str, Any]:
     return clean
 
 
-def mapper() -> StockMapper:
-    global _mapper
-    if _mapper is None:
-        _mapper = StockMapper()
-    return _mapper
-
-
-def equities():
-    global _equities
-    if _equities is None:
-        _equities = fd.Equities()
-    return _equities
-
-
-def configure_edgar() -> None:
+def configure_edgar() -> str:
     identity = os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT")
     if not identity:
         raise HTTPException(status_code=503, detail="edgar_identity_not_configured")
-    set_identity(identity)
+    return identity
+
+
+def provider_get_json(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    response = httpx.get(url, params=params, headers=headers, timeout=20, follow_redirects=True)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("provider_response_not_an_object")
+    return payload
+
+
+def provider_get_text(url: str, *, headers: dict[str, str] | None = None) -> str:
+    response = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
+    response.raise_for_status()
+    return response.text
+
+
+def sec_headers() -> dict[str, str]:
+    return {
+        "User-Agent": configure_edgar(),
+        "Accept-Encoding": "gzip, deflate",
+        "Host": "www.sec.gov",
+    }
+
+
+def parse_ticker_catalog(payload: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    fields = payload.get("fields")
+    rows = payload.get("data")
+    if not isinstance(fields, list) or not isinstance(rows, list):
+        raise ValueError("invalid_sec_ticker_catalog")
+
+    by_ticker: dict[str, dict[str, Any]] = {}
+    by_cik: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, list) or len(row) != len(fields):
+            continue
+        record = dict(zip(fields, row))
+        ticker = str(record.get("ticker") or "").upper().strip()
+        cik = str(record.get("cik") or "").zfill(10)
+        if ticker:
+            by_ticker[ticker] = record
+        if cik.strip("0"):
+            by_cik[cik] = record
+    return by_ticker, by_cik
+
+
+def ticker_catalog() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    global _ticker_records, _cik_records
+    if _ticker_records is None or _cik_records is None:
+        payload = provider_get_json(SEC_TICKERS_URL, headers=sec_headers())
+        _ticker_records, _cik_records = parse_ticker_catalog(payload)
+    return _ticker_records, _cik_records
+
+
+def resolve_identifier(identifier: str) -> tuple[str, dict[str, Any] | None]:
+    key = identifier.upper().strip()
+    by_ticker, by_cik = ticker_catalog()
+    if key.isdigit():
+        cik = key.zfill(10)
+        return cik, by_cik.get(cik)
+    record = by_ticker.get(key)
+    if record is None:
+        raise HTTPException(status_code=404, detail="company_not_found")
+    return str(record.get("cik") or "").zfill(10), record
+
+
+def company_submissions(identifier: str) -> tuple[str, dict[str, Any]]:
+    cik, _ = resolve_identifier(identifier)
+    payload = provider_get_json(
+        SEC_SUBMISSIONS_URL.format(cik=cik),
+        headers=sec_headers() | {"Host": "data.sec.gov"},
+    )
+    return cik, payload
+
+
+def recent_filings(payload: dict[str, Any], form: str, limit: int) -> list[dict[str, Any]]:
+    recent = payload.get("filings", {}).get("recent", {})
+    if not isinstance(recent, dict):
+        raise ValueError("invalid_sec_submissions")
+    forms = recent.get("form") or []
+    rows: list[dict[str, Any]] = []
+    for index, filing_form in enumerate(forms):
+        if str(filing_form).upper() != form.upper():
+            continue
+        rows.append({
+            "accessionNumber": (recent.get("accessionNumber") or [None] * len(forms))[index],
+            "form": filing_form,
+            "filingDate": (recent.get("filingDate") or [None] * len(forms))[index],
+            "reportDate": (recent.get("reportDate") or [None] * len(forms))[index],
+            "primaryDocument": (recent.get("primaryDocument") or [None] * len(forms))[index],
+        })
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def xml_text(node: ElementTree.Element, name: str) -> str | None:
+    for descendant in node.iter():
+        if descendant.tag.rsplit("}", 1)[-1] != name:
+            continue
+        if descendant.text and descendant.text.strip():
+            return descendant.text.strip()
+        for child in descendant.iter():
+            if child is not descendant and child.text and child.text.strip():
+                return child.text.strip()
+    return None
+
+
+def parse_form4_xml(xml: str) -> dict[str, Any]:
+    root = ElementTree.fromstring(xml)
+    owner = next((node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "reportingOwner"), None)
+    issuer = next((node for node in root.iter() if node.tag.rsplit("}", 1)[-1] == "issuer"), None)
+
+    def transactions(tag: str) -> list[dict[str, Any]]:
+        output: list[dict[str, Any]] = []
+        for node in root.iter():
+            if node.tag.rsplit("}", 1)[-1] != tag:
+                continue
+            output.append({
+                "securityTitle": xml_text(node, "securityTitle"),
+                "transactionDate": xml_text(node, "transactionDate"),
+                "transactionCode": xml_text(node, "transactionCode"),
+                "shares": xml_text(node, "transactionShares"),
+                "pricePerShare": xml_text(node, "transactionPricePerShare"),
+                "acquiredDisposedCode": xml_text(node, "transactionAcquiredDisposedCode"),
+                "sharesOwnedFollowing": xml_text(node, "sharesOwnedFollowingTransaction"),
+                "ownershipNature": xml_text(node, "directOrIndirectOwnership"),
+            })
+        return output
+
+    return {
+        "issuer": {
+            "cik": xml_text(issuer, "issuerCik") if issuer is not None else None,
+            "name": xml_text(issuer, "issuerName") if issuer is not None else None,
+            "symbol": xml_text(issuer, "issuerTradingSymbol") if issuer is not None else None,
+        },
+        "reportingOwner": {
+            "cik": xml_text(owner, "rptOwnerCik") if owner is not None else None,
+            "name": xml_text(owner, "rptOwnerName") if owner is not None else None,
+        },
+        "nonDerivativeTransactions": transactions("nonDerivativeTransaction"),
+        "derivativeTransactions": transactions("derivativeTransaction"),
+    }
+
+
+def parse_fred_observations(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    observations = payload.get("observations")
+    if not isinstance(observations, list):
+        raise ValueError("invalid_fred_response")
+    rows: list[dict[str, Any]] = []
+    for observation in observations:
+        if not isinstance(observation, dict):
+            continue
+        raw_value = observation.get("value")
+        rows.append({
+            "observationDate": observation.get("date"),
+            "vintageDate": observation.get("realtime_start"),
+            "value": None if raw_value in (None, ".") else float(raw_value),
+        })
+    return rows
 
 
 @app.get("/health")
@@ -99,11 +259,8 @@ def health() -> dict[str, Any]:
         "mode": "shadow",
         "capitalExecutionEnabled": False,
         "repositories": {
-            "edgartools": package_version("edgartools"),
-            "sec-cik-mapper": package_version("sec-cik-mapper"),
-            "financedatabase": package_version("financedatabase"),
-            "pandas-market-calendars": package_version("pandas-market-calendars"),
-            "fredapi": package_version("fredapi"),
+            "httpx": package_version("httpx"),
+            "holidays": package_version("holidays"),
         },
         "configured": {
             "edgar": bool(os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT")),
@@ -115,14 +272,18 @@ def health() -> dict[str, Any]:
 @app.get("/identity/{symbol}")
 def resolve_identity(symbol: str) -> dict[str, Any]:
     symbol = symbol.upper().strip()
-    m = mapper()
-    cik = m.ticker_to_cik.get(symbol)
+    try:
+        cik, record = resolve_identifier(symbol)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"sec_identity_failed:{exc}") from exc
     return {
         "symbol": symbol,
         "cik": cik,
-        "issuerName": m.ticker_to_company_name.get(symbol),
-        "exchange": m.ticker_to_exchange.get(symbol),
-        "source": "sec-cik-mapper",
+        "issuerName": record.get("name") if record else None,
+        "exchange": record.get("exchange") if record else None,
+        "source": "sec-company-tickers",
         "evidenceClass": "reference",
         "mode": "shadow",
         "capitalExecutionEnabled": False,
@@ -132,16 +293,24 @@ def resolve_identity(symbol: str) -> dict[str, Any]:
 @app.get("/reference/equity/{symbol}")
 def equity_reference(symbol: str) -> dict[str, Any]:
     symbol = symbol.upper().strip()
-    frame = equities().data
-    matches = frame.loc[frame.index.astype(str).str.upper() == symbol]
-    if matches.empty:
-        return {"symbol": symbol, "found": False, "source": "financedatabase", "evidenceClass": "reference"}
-    rows = [normalize_record(row) | {"symbol": str(index)} for index, row in matches.head(10).iterrows()]
+    try:
+        cik, record = resolve_identifier(symbol)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return {"symbol": symbol, "found": False, "source": "sec-company-tickers", "evidenceClass": "reference"}
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"equity_reference_failed:{exc}") from exc
     return {
         "symbol": symbol,
         "found": True,
-        "records": rows,
-        "source": "financedatabase",
+        "records": [{
+            "symbol": symbol,
+            "cik": cik,
+            "name": record.get("name") if record else None,
+            "exchange": record.get("exchange") if record else None,
+        }],
+        "source": "sec-company-tickers",
         "evidenceClass": "reference",
         "mode": "shadow",
         "capitalExecutionEnabled": False,
@@ -152,25 +321,36 @@ def equity_reference(symbol: str) -> dict[str, Any]:
 def market_calendar(exchange: str, start: date = Query(...), end: date = Query(...)) -> dict[str, Any]:
     if start > end:
         raise HTTPException(status_code=400, detail="invalid_date_range")
+    exchange_key = exchange.upper().strip()
+    if exchange_key not in US_EQUITY_EXCHANGES:
+        raise HTTPException(status_code=404, detail="calendar_not_supported")
     try:
-        calendar = mcal.get_calendar(exchange)
+        years = range(start.year, end.year + 1)
+        closed_days = holidays.financial_holidays("XNYS", years=years, categories=(PUBLIC,))
+        half_days = holidays.financial_holidays("XNYS", years=years, categories=(HALF_DAY,))
     except Exception as exc:
         raise HTTPException(status_code=404, detail=f"calendar_not_found:{exc}") from exc
-    schedule = calendar.schedule(start_date=start, end_date=end, tz="UTC")
-    early = set(calendar.early_closes(schedule).index.strftime("%Y-%m-%d"))
-    sessions = []
-    for session_date, row in schedule.iterrows():
-        key = session_date.strftime("%Y-%m-%d")
+
+    sessions: list[dict[str, Any]] = []
+    session_date = start
+    while session_date <= end:
+        if session_date.weekday() >= 5 or session_date in closed_days:
+            session_date += timedelta(days=1)
+            continue
+        early_close = session_date in half_days
+        open_at = datetime.combine(session_date, time(9, 30), tzinfo=NEW_YORK).astimezone(UTC)
+        close_at = datetime.combine(session_date, time(13 if early_close else 16, 0), tzinfo=NEW_YORK).astimezone(UTC)
         sessions.append({
-            "sessionDate": key,
-            "openAt": row["market_open"].isoformat(),
-            "closeAt": row["market_close"].isoformat(),
-            "earlyClose": key in early,
+            "sessionDate": session_date.isoformat(),
+            "openAt": open_at.isoformat(),
+            "closeAt": close_at.isoformat(),
+            "earlyClose": early_close,
         })
+        session_date += timedelta(days=1)
     return {
         "exchange": exchange,
         "sessions": sessions,
-        "source": "pandas-market-calendars",
+        "source": "python-holidays:xnys",
         "evidenceClass": "reference",
         "mode": "shadow",
         "capitalExecutionEnabled": False,
@@ -187,20 +367,21 @@ def fred_series(
     key = os.getenv("FRED_API_KEY")
     if not key:
         raise HTTPException(status_code=503, detail="fred_api_key_not_configured")
-    fred = Fred(api_key=key)
+    params: dict[str, Any] = {
+        "series_id": series_id,
+        "api_key": key,
+        "file_type": "json",
+    }
+    if start:
+        params["observation_start"] = start
+    if end:
+        params["observation_end"] = end
+    if vintage_date:
+        params["realtime_start"] = vintage_date
+        params["realtime_end"] = vintage_date
     try:
-        if vintage_date:
-            series = fred.get_series_as_of_date(series_id, vintage_date)
-            rows = [
-                {"observationDate": str(row["date"]), "vintageDate": str(row["realtime_start"]), "value": row["value"]}
-                for _, row in series.iterrows()
-            ]
-        else:
-            series = fred.get_series(series_id, observation_start=start, observation_end=end)
-            rows = [
-                {"observationDate": index.date().isoformat(), "vintageDate": date.today().isoformat(), "value": None if value != value else float(value)}
-                for index, value in series.items()
-            ]
+        payload = provider_get_json(FRED_OBSERVATIONS_URL, params=params)
+        rows = parse_fred_observations(payload)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"fred_failed:{exc}") from exc
     return {
@@ -215,18 +396,16 @@ def fred_series(
 
 @app.get("/edgar/company/{identifier}")
 def edgar_company(identifier: str) -> dict[str, Any]:
-    configure_edgar()
     try:
-        company = Company(identifier)
-        data = company.data
+        cik, data = company_submissions(identifier)
         return {
             "identifier": identifier,
-            "cik": str(company.cik).zfill(10),
-            "name": company.name,
-            "tickers": list(getattr(data, "tickers", []) or []),
-            "exchanges": list(getattr(data, "exchanges", []) or []),
-            "formerNames": normalize_record({"former_names": getattr(data, "former_names", None)}).get("former_names"),
-            "source": "sec-edgar:edgartools",
+            "cik": cik,
+            "name": data.get("name"),
+            "tickers": list(data.get("tickers") or []),
+            "exchanges": list(data.get("exchanges") or []),
+            "formerNames": list(data.get("formerNames") or []),
+            "source": "sec-edgar:submissions",
             "evidenceClass": "authoritative",
             "mode": "shadow",
             "capitalExecutionEnabled": False,
@@ -237,25 +416,18 @@ def edgar_company(identifier: str) -> dict[str, Any]:
 
 @app.get("/edgar/filings/{identifier}")
 def edgar_filings(identifier: str, form: str = "8-K", limit: int = 20) -> dict[str, Any]:
-    configure_edgar()
     limit = max(1, min(100, limit))
     try:
-        company = Company(identifier)
-        filings = company.get_filings(form=form).head(limit)
-        rows = []
-        for filing in filings:
-            rows.append({
-                "accessionNumber": getattr(filing, "accession_no", None),
-                "form": getattr(filing, "form", form),
-                "filingDate": str(getattr(filing, "filing_date", "")),
-                "company": getattr(filing, "company", None),
-                "cik": str(getattr(filing, "cik", company.cik)).zfill(10),
-            })
+        cik, company = company_submissions(identifier)
+        rows = recent_filings(company, form, limit)
+        for row in rows:
+            row["company"] = company.get("name")
+            row["cik"] = cik
         return {
             "identifier": identifier,
             "form": form,
             "filings": rows,
-            "source": "sec-edgar:edgartools",
+            "source": "sec-edgar:submissions",
             "evidenceClass": "authoritative",
             "mode": "shadow",
             "capitalExecutionEnabled": False,
@@ -266,27 +438,37 @@ def edgar_filings(identifier: str, form: str = "8-K", limit: int = 20) -> dict[s
 
 @app.get("/edgar/form4/{identifier}")
 def edgar_form4(identifier: str, limit: int = 20) -> dict[str, Any]:
-    configure_edgar()
     limit = max(1, min(50, limit))
     try:
-        company = Company(identifier)
-        filings = company.get_filings(form="4").head(limit)
-        rows: list[dict[str, Any]] = []
-        for filing in filings:
+        cik, company = company_submissions(identifier)
+        filings = recent_filings(company, "4", limit)
+
+        def load_filing(filing: dict[str, Any]) -> dict[str, Any]:
+            accession = str(filing.get("accessionNumber") or "")
+            document = str(filing.get("primaryDocument") or "")
             try:
-                obj = filing.obj()
-                payload = obj.to_dict() if hasattr(obj, "to_dict") else {"text": str(obj)}
+                if not accession or not document:
+                    raise ValueError("filing_document_missing")
+                url = SEC_ARCHIVES_URL.format(
+                    cik=int(cik),
+                    accession=accession.replace("-", ""),
+                    document=document,
+                )
+                payload = parse_form4_xml(provider_get_text(url, headers=sec_headers()))
             except Exception as exc:
                 payload = {"parseError": str(exc)}
-            rows.append({
-                "accessionNumber": getattr(filing, "accession_no", None),
-                "filingDate": str(getattr(filing, "filing_date", "")),
-                "payload": normalize_record(payload),
-            })
+            return {
+                "accessionNumber": filing.get("accessionNumber"),
+                "filingDate": filing.get("filingDate"),
+                "payload": payload,
+            }
+
+        with ThreadPoolExecutor(max_workers=min(5, len(filings) or 1)) as pool:
+            rows = list(pool.map(load_filing, filings))
         return {
             "identifier": identifier,
             "transactions": rows,
-            "source": "sec-edgar:edgartools",
+            "source": "sec-edgar:submissions+xml",
             "evidenceClass": "authoritative",
             "mode": "shadow",
             "capitalExecutionEnabled": False,

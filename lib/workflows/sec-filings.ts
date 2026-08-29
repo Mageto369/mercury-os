@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { isNotNull } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { filings, securities, systemEvents } from '@/lib/db/schema';
 import { classifyFilingForm } from '@/lib/intelligence/filing-classifier';
 import { fetchSecRecentFilings } from '@/lib/providers/sec';
@@ -78,6 +79,22 @@ export async function runSecFilingsWorkflow(): Promise<SecWorkflowResult> {
             },
           }).onConflictDoNothing({ target: systemEvents.eventKey }).returning({ id: systemEvents.id });
           signalsCreated += eventResult.length;
+          if (eventResult.length && classification.priority !== 'normal') {
+            await routeOperationalAlert({
+              eventKey: `sec:${event.accessionNumber}`,
+              category: 'filing',
+              severity: classification.priority,
+              title: `${security.symbol} material SEC filing`,
+              message: `${security.symbol} filed ${event.form}: ${classification.label}`,
+              payload: {
+                symbol: security.symbol,
+                accessionNumber: event.accessionNumber,
+                form: event.form,
+                riskDelta: classification.riskDelta,
+                catalystDelta: classification.catalystDelta,
+              },
+            });
+          }
         }
       }
     } catch (error) {

@@ -39,6 +39,15 @@ export interface AlertRoutingResult {
   capitalExecutionEnabled: false;
 }
 
+export function reportPersistedOutcomes(outcomes: DeliveryOutcome[], persisted: boolean): DeliveryOutcome[] {
+  if (persisted) return outcomes;
+  return outcomes.map((outcome) => (
+    outcome.channel === 'dashboard' && outcome.status === 'delivered'
+      ? { ...outcome, status: 'failed', reason: 'dashboard_persistence_failed', error: 'delivery_history_write_failed' }
+      : outcome
+  ));
+}
+
 function emptyResult(persisted: boolean, outcomes: DeliveryOutcome[] = []): AlertRoutingResult {
   return {
     routed: outcomes.some((o) => o.status === 'delivered'),
@@ -255,35 +264,43 @@ export async function routeOperationalAlert(input: {
 
   let persisted = false;
   try {
-    for (const outcome of outcomes) {
-      await sql`
-        insert into alert_deliveries
-          (id, event_key, severity, channel, destination, status, shadow_only, attempts, payload, error, delivered_at)
-        values (
-          ${randomUUID()}, ${event.eventKey ?? null}, ${event.severity}, ${outcome.channel},
-          ${outcome.destination}, ${outcome.status}, true,
-          ${outcome.status === 'delivered' || outcome.status === 'failed' ? 1 : 0},
-          ${JSON.stringify({ ...basePayload, ruleKey: outcome.ruleKey, ruleName: outcome.ruleName, reason: outcome.reason })}::jsonb,
-          ${outcome.error}, ${outcome.status === 'delivered' ? new Date().toISOString() : null}
-        )
-      `;
-    }
+    // One alert is one history transaction. Partial history would make rule
+    // health and cooldown evidence disagree about what happened.
+    await sql.begin(async (tx) => {
+      for (const outcome of outcomes) {
+        await tx`
+          insert into alert_deliveries
+            (id, event_key, severity, channel, destination, status, shadow_only, attempts, payload, error, delivered_at)
+          values (
+            ${randomUUID()}, ${event.eventKey ?? null}, ${event.severity}, ${outcome.channel},
+            ${outcome.destination}, ${outcome.status}, true,
+            ${outcome.status === 'delivered' || outcome.status === 'failed' ? 1 : 0},
+            ${JSON.stringify({ ...basePayload, ruleKey: outcome.ruleKey, ruleName: outcome.ruleName, reason: outcome.reason })}::jsonb,
+            ${outcome.error}, ${outcome.status === 'delivered' ? new Date().toISOString() : null}
+          )
+        `;
+      }
+    });
     persisted = true;
   } catch (cause) {
     persisted = false;
     console.error('alert_delivery_persist_failed', cause instanceof Error ? cause.message : cause);
   }
 
+  // A dashboard delivery is the committed history row itself. If persistence
+  // rolled back, reporting dashboard success would be an optimistic lie.
+  const reportedOutcomes = reportPersistedOutcomes(outcomes, persisted);
+
   return {
-    routed: outcomes.some((o) => o.status === 'delivered'),
+    routed: reportedOutcomes.some((o) => o.status === 'delivered'),
     persisted,
     rulesEvaluated: rules.length,
     rulesMatched: matches.length,
-    delivered: outcomes.filter((o) => o.status === 'delivered').length,
-    skipped: outcomes.filter((o) => o.status === 'skipped').length,
-    unavailable: outcomes.filter((o) => o.status === 'unavailable').length,
-    failed: outcomes.filter((o) => o.status === 'failed').length,
-    outcomes,
+    delivered: reportedOutcomes.filter((o) => o.status === 'delivered').length,
+    skipped: reportedOutcomes.filter((o) => o.status === 'skipped').length,
+    unavailable: reportedOutcomes.filter((o) => o.status === 'unavailable').length,
+    failed: reportedOutcomes.filter((o) => o.status === 'failed').length,
+    outcomes: reportedOutcomes,
     shadowOnly: true,
     capitalExecutionEnabled: false,
   };

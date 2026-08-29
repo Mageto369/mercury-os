@@ -145,10 +145,10 @@ def ticker_catalog() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any
 
 def resolve_identifier(identifier: str) -> tuple[str, dict[str, Any] | None]:
     key = identifier.upper().strip()
-    by_ticker, by_cik = ticker_catalog()
     if key.isdigit():
         cik = key.zfill(10)
-        return cik, by_cik.get(cik)
+        return cik, _cik_records.get(cik) if _cik_records is not None else None
+    by_ticker, _ = ticker_catalog()
     record = by_ticker.get(key)
     if record is None:
         raise HTTPException(status_code=404, detail="company_not_found")
@@ -410,6 +410,8 @@ def edgar_company(identifier: str) -> dict[str, Any]:
             "mode": "shadow",
             "capitalExecutionEnabled": False,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"edgar_company_failed:{exc}") from exc
 
@@ -432,6 +434,8 @@ def edgar_filings(identifier: str, form: str = "8-K", limit: int = 20) -> dict[s
             "mode": "shadow",
             "capitalExecutionEnabled": False,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"edgar_filings_failed:{exc}") from exc
 
@@ -473,5 +477,7 @@ def edgar_form4(identifier: str, limit: int = 20) -> dict[str, Any]:
             "mode": "shadow",
             "capitalExecutionEnabled": False,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"edgar_form4_failed:{exc}") from exc

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { desc, eq, gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { replayRuns } from '@/lib/db/ops-schema';
 import { decisionLogs, opportunities, securities, systemEvents } from '@/lib/db/schema';
 
@@ -77,7 +78,7 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
 
   if (driftDetected) {
     const eventKey = `model-learning:${new Date().toISOString().slice(0, 10)}`;
-    await db.insert(systemEvents).values({
+    const inserted = await db.insert(systemEvents).values({
       id: randomUUID(),
       eventKey,
       category: 'model:drift',
@@ -85,7 +86,17 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
       source: 'replay-agent',
       message: `Replay detected model-quality drift across ${opportunityRows.length} shadow opportunities.`,
       payload: { metrics, lookbackDays, replayRunId, modelVersion },
-    }).onConflictDoNothing({ target: systemEvents.eventKey });
+    }).onConflictDoNothing({ target: systemEvents.eventKey }).returning({ id: systemEvents.id });
+    if (inserted.length) {
+      await routeOperationalAlert({
+        eventKey,
+        category: 'model',
+        severity: 'high',
+        title: 'Shadow model drift detected',
+        message: `Replay detected model-quality drift across ${opportunityRows.length} shadow opportunities.`,
+        payload: { metrics, lookbackDays, replayRunId, modelVersion },
+      });
+    }
   }
 
   await db.update(replayRuns).set({

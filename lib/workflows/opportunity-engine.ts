@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { scoreOpportunity } from '@/lib/alpha/scoring';
+import { routeOperationalAlert } from '@/lib/alerts/router';
 import { getDb } from '@/lib/db';
 import { decisionLogs, opportunities, securities } from '@/lib/db/schema';
 import type { OpportunityInput, OpportunityState } from '@/lib/domain/types';
@@ -140,6 +141,24 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
       inputs: input,
       rationale: { reasons: decision.reasons, alpha: decision.alpha, asymmetry: decision.asymmetry },
     });
+
+    if (input.confidence >= 80 && !decision.hardBlocked) {
+      await routeOperationalAlert({
+        eventKey: `opportunity:${opportunityId}`,
+        category: 'opportunity',
+        severity: 'high',
+        title: `${candidate.symbol} high-confidence shadow opportunity`,
+        message: `${candidate.symbol} scored ${input.confidence}% confidence with action ${decision.action}.`,
+        payload: {
+          confidence: input.confidence,
+          symbol: candidate.symbol,
+          opportunityId,
+          action: decision.action,
+          alpha: decision.alpha,
+          asymmetry: decision.asymmetry,
+        },
+      });
+    }
 
     generated.push({ symbol: candidate.symbol, opportunityId, decision, state });
   }

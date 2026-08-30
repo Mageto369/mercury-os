@@ -1,4 +1,5 @@
 import type { FilingEvent } from '@/lib/providers/contracts';
+import { getSecUserAgent } from '@/lib/providers/sec-identity';
 
 interface SecSubmissionsResponse {
   cik: string;
@@ -18,8 +19,7 @@ function normalizeCik(cik: string) {
 }
 
 export async function fetchSecRecentFilings(cik: string, forms?: Set<string>): Promise<FilingEvent[]> {
-  const userAgent = process.env.SEC_USER_AGENT;
-  if (!userAgent) throw new Error('SEC_USER_AGENT is not configured');
+  const userAgent = getSecUserAgent();
 
   const normalizedCik = normalizeCik(cik);
   const response = await fetch(`https://data.sec.gov/submissions/CIK${normalizedCik}.json`, {

@@ -11,7 +11,7 @@ export async function GET() {
       process.env.MASSIVE_API_KEY || process.env.MARKET_DATA_API_KEY,
     ),
     intrinio: Boolean(process.env.INTRINIO_API_KEY),
-    sec: Boolean(process.env.SEC_USER_AGENT),
+    sec: true,
     fred: Boolean(process.env.FRED_API_KEY),
     openIntelligence: Boolean(process.env.OPEN_INTELLIGENCE_URL),
     researchProof: Boolean(process.env.RESEARCH_PROOF_URL),

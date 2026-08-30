@@ -38,14 +38,14 @@ No component currently has broker credentials or live capital authority. Capital
 - React + TypeScript
 - Drizzle ORM
 - generic Postgres.js runtime compatible with Supabase
-- Vercel deployment and cron orchestration
+- Docker Compose personal-server deployment and Vercel deployment support
 - Playwright desktop/mobile E2E testing
 
 ## Supabase activation
 
 Apply both migrations under `supabase/migrations`, then configure the server-side Supabase pooled Postgres connection string as `DATABASE_URL`.
 
-The protected activation path then performs:
+The activation path then performs:
 
 ```text
 warehouse bootstrap
@@ -62,11 +62,33 @@ warehouse bootstrap
 
 See `docs/supabase-activation.md` and `docs/AGENT_SYSTEM.md`.
 
-## Deploy
+## Personal-server deployment
+
+Mercury ships as one Docker Compose stack with the Next.js application, both
+Python sidecars, and a minute scheduler. The scheduler calls the normal cadence
+aware cycle. The Operations page also exposes **Run full cycle** for an
+immediate pass across every enabled pipeline.
+
+```bash
+cp .env.example .env
+# Set DATABASE_URL and any paid provider keys you want to use.
+docker compose up --build -d
+```
+
+Open `http://localhost:3000`. SEC EDGAR and FINRA run without paid keys. The
+repository-identifying SEC user agent works by default and `SEC_USER_AGENT`
+remains available as an override.
+
+Mercury application routes are open for a personal-server deployment. Keep the
+server on a private network if it should not be reachable by other users.
+
+## Vercel deployment
 
 [Deploy Mercury OS to Vercel](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2FMageto369%2Fmercury-os&project-name=mercury-os&repository-name=mercury-os)
 
-Configure `CRON_SECRET` and `DATABASE_URL` first. Then add only authorized provider credentials from `.env.example`.
+Configure `DATABASE_URL` first. Then add provider credentials from
+`.env.example` as needed. Vercel invokes the cadence-aware intelligence route
+every minute.
 
 ## Validation gate
 
@@ -81,7 +103,9 @@ npx playwright install --with-deps chromium
 npm run test:e2e
 ```
 
-The suite validates desktop and mobile UI, agent authority, fail-closed behavior, ingestion boundaries, cron authentication, readiness, promotion gates, intelligence-lab APIs, research-only portfolio behavior, and the permanent capital-execution lock.
+The suite validates desktop and mobile UI, open personal-server access,
+ingestion boundaries, readiness, promotion gates, intelligence-lab APIs,
+research-only portfolio behavior, and the permanent capital-execution lock.
 
 ## Development
 

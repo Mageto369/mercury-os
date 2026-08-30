@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { bootstrapOpenDataMesh } from '@/lib/db/bootstrap-open-data';
+import { getSecUserAgent } from '@/lib/providers/sec-identity';
 
 function cik10(cik: string) { return cik.replace(/\D/g, '').padStart(10, '0').slice(-10); }
 function hash(value: unknown) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
@@ -18,8 +19,7 @@ async function health(provider: string, configured: boolean, authoritative: bool
 export async function pullSecCompanyFacts(limit = 25) {
   const sql = getSql(); if (!sql) return { ok:false as const, reason:'database_not_configured' as const };
   await bootstrapOpenDataMesh();
-  const ua = process.env.SEC_USER_AGENT; const started = Date.now();
-  if (!ua) { await health('sec-companyfacts', false, true, {ok:false, latencyMs:0, records:0, error:'SEC_USER_AGENT not configured'}); return {ok:false as const, reason:'sec_user_agent_not_configured' as const}; }
+  const ua = getSecUserAgent(); const started = Date.now();
   const rows = await sql`SELECT id, cik FROM securities WHERE active=true AND cik IS NOT NULL ORDER BY symbol LIMIT ${Math.max(1, Math.min(200, limit))}`;
   let inserted = 0; const errors:string[]=[];
   for (const row of rows) {
@@ -66,7 +66,7 @@ export async function pullFinraRegSho(limit = 5000) {
 
 export async function getOpenDataStatus() {
   const sql=getSql();
-  if(!sql) return {available:false as const, reason:'database_not_configured' as const, mode:'shadow' as const, capitalExecutionEnabled:false as const, providers:[{provider:'sec-companyfacts',authoritative:true,configured:Boolean(process.env.SEC_USER_AGENT)},{provider:'finra-regsho',authoritative:true,configured:true},{provider:'openbb',authoritative:false,configured:Boolean(process.env.OPENBB_API_URL)}]};
+  if(!sql) return {available:false as const, reason:'database_not_configured' as const, mode:'shadow' as const, capitalExecutionEnabled:false as const, providers:[{provider:'sec-companyfacts',authoritative:true,configured:true},{provider:'finra-regsho',authoritative:true,configured:true},{provider:'openbb',authoritative:false,configured:Boolean(process.env.OPENBB_API_URL)}]};
   try { const providers=await sql`SELECT * FROM provider_health WHERE provider_group='open-data' ORDER BY provider`; return {available:true as const, mode:'shadow' as const, capitalExecutionEnabled:false as const, providers, openbb:{configured:Boolean(process.env.OPENBB_API_URL), role:'optional-provider-bridge'}}; }
   catch { return {available:false as const, reason:'open_data_schema_not_initialized' as const, mode:'shadow' as const, capitalExecutionEnabled:false as const}; }
 }

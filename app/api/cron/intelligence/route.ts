@@ -21,7 +21,21 @@ import type { IntelligenceJobName } from "@/lib/workflows/jobs";
 export const runtime = "nodejs";
 
 type SafeResult = { ok: false; reason: string } | Record<string, unknown>;
-function statusOf(result: unknown): "success" | "degraded" {
+type RunStatus = "success" | "degraded" | "skipped";
+type PipelineSummary = {
+  status: RunStatus;
+  error: string | null;
+  components: Array<{ name: string; status: RunStatus; reason: string | null }>;
+};
+
+function statusOf(result: unknown): RunStatus {
+  if (!result) return "degraded";
+  if (result && typeof result === "object" && "status" in result) {
+    const status = String((result as { status?: unknown }).status ?? "");
+    if (status === "completed" || status === "success") return "success";
+    if (status === "skipped") return "skipped";
+    if (status === "degraded" || status === "failed") return "degraded";
+  }
   return result &&
     typeof result === "object" &&
     "ok" in result &&
@@ -30,18 +44,47 @@ function statusOf(result: unknown): "success" | "degraded" {
     : "success";
 }
 function reasonOf(result: unknown) {
-  return result && typeof result === "object" && "reason" in result
-    ? String((result as { reason?: unknown }).reason ?? "degraded")
-    : null;
+  if (!result || typeof result !== "object") return "result_missing";
+  if ("reason" in result)
+    return String((result as { reason?: unknown }).reason ?? "degraded");
+  if ("message" in result && statusOf(result) !== "success")
+    return String((result as { message?: unknown }).message ?? "degraded");
+  return null;
 }
-async function record(policy: IngestionPolicy | undefined, result: unknown) {
+function nestedResult(result: unknown, key: string) {
+  return result && typeof result === "object" && key in result
+    ? (result as Record<string, unknown>)[key]
+    : result;
+}
+function summarizePipeline(
+  parts: Array<{ name: string; result: unknown }>,
+): PipelineSummary {
+  const components = parts.map(({ name, result }) => ({
+    name,
+    status: statusOf(result),
+    reason: reasonOf(result),
+  }));
+  const status = components.every((part) => part.status === "success")
+    ? "success"
+    : components.every((part) => part.status === "skipped")
+      ? "skipped"
+      : "degraded";
+  const errors = components
+    .filter((part) => part.status !== "success")
+    .map((part) => `${part.name}: ${part.reason ?? part.status}`);
+  return { status, error: errors.join(" | ") || null, components };
+}
+async function record(
+  policy: IngestionPolicy | undefined,
+  summary: PipelineSummary,
+) {
   if (policy?.due)
-    await recordIngestionResult(policy, statusOf(result), reasonOf(result));
+    await recordIngestionResult(policy, summary.status, summary.error);
 }
 
-export async function GET() {
+async function runIntelligenceCycle(force = false) {
   const now = new Date();
-  const ingestion = await getIngestionPolicies(now);
+  const ingestion = await getIngestionPolicies(now, force);
   const marketPolicy = ingestion["market-snapshots"];
   const openIntelDue = [
     "sec-filings",
@@ -109,13 +152,6 @@ export async function GET() {
       reason: "not_due_or_disabled_by_ingestion_policy",
     };
 
-  await record(marketPolicy, marketRefresh);
-  for (const key of ["sec-filings", "corporate-actions"] as const)
-    if (ingestion[key]?.due) await record(ingestion[key], openDataRefresh);
-  for (const key of ["share-structure", "macro-series"] as const)
-    if (ingestion[key]?.due)
-      await record(ingestion[key], openIntelligenceRefresh);
-
   const jobMap: Partial<Record<keyof typeof ingestion, IntelligenceJobName>> = {
     "social-radar": "social-radar",
     "sec-filings": "sec-filings",
@@ -127,22 +163,43 @@ export async function GET() {
     .filter(([key]) => ingestion[key]?.due)
     .map(([, job]) => job!)
     .filter(Boolean);
-  const result = await runSupervisor(now, requestedJobs, "cron");
-  for (const [key, job] of Object.entries(jobMap)) {
-    const policy = ingestion[key];
-    if (!policy?.due || !job) continue;
-    const assignment = result.assignments.find((a) => a.job === job);
-    if (assignment)
-      await recordIngestionResult(
-        policy,
-        assignment.status === "completed"
-          ? "success"
-          : assignment.status === "skipped"
-            ? "skipped"
-            : "degraded",
-        assignment.status === "completed" ? null : assignment.message,
-      );
-  }
+  const result = await runSupervisor(now, requestedJobs, force ? "manual" : "cron");
+  const assignment = (job: IntelligenceJobName) =>
+    result.assignments.find((item) => item.job === job) ?? {
+      status: "skipped",
+      message: "workflow_not_requested",
+    };
+  const pipelineResults = {
+    "market-snapshots": summarizePipeline([
+      { name: "market-provider", result: marketRefresh },
+    ]),
+    "sec-filings": summarizePipeline([
+      { name: "company-facts", result: nestedResult(openDataRefresh, "sec") },
+      { name: "recent-filings", result: assignment("sec-filings") },
+    ]),
+    "corporate-actions": summarizePipeline([
+      { name: "finra-regsho", result: nestedResult(openDataRefresh, "finra") },
+      { name: "corporate-action-agent", result: assignment("finra-actions") },
+    ]),
+    "share-structure": summarizePipeline([
+      { name: "open-intelligence", result: openIntelligenceRefresh },
+      { name: "share-structure-agent", result: assignment("share-structure") },
+    ]),
+    "macro-series": summarizePipeline([
+      { name: "open-intelligence", result: openIntelligenceRefresh },
+    ]),
+    "social-radar": summarizePipeline([
+      { name: "social-radar-agent", result: assignment("social-radar") },
+    ]),
+    "research-proof": summarizePipeline([
+      { name: "model-learning-agent", result: assignment("model-learning") },
+    ]),
+  } satisfies Record<string, PipelineSummary>;
+  await Promise.all(
+    Object.entries(pipelineResults).map(([key, summary]) =>
+      record(ingestion[key], summary),
+    ),
+  );
 
   try {
     entityGraph = await buildEntityRelationshipGraph();
@@ -265,6 +322,8 @@ export async function GET() {
     ).length,
     escalations: result.escalations,
     ingestionPolicies: ingestion,
+    forced: force,
+    pipelineResults,
     marketRefresh,
     openDataRefresh,
     openIntelligenceRefresh,
@@ -277,4 +336,12 @@ export async function GET() {
     restingOrders,
     jobs: result.assignments,
   });
+}
+
+export async function GET() {
+  return runIntelligenceCycle(false);
+}
+
+export async function POST() {
+  return runIntelligenceCycle(true);
 }

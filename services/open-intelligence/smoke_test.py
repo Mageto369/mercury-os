@@ -103,11 +103,7 @@ except HTTPException as exc:
 else:
     raise AssertionError('Unsupported calendars must fail explicitly')
 
-try:
-    configure_edgar()
-except HTTPException as exc:
-    assert exc.status_code == 503 and exc.detail == 'edgar_identity_not_configured'
-else:
-    raise AssertionError('EDGAR must fail closed in CI without identity')
+assert 'Mageto369/mercury-os' in configure_edgar()
+assert health()['configured']['edgar'] is True
 
 print('open-intelligence smoke: ok')

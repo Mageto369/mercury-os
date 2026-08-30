@@ -18,6 +18,11 @@ test("open data mesh exposes authoritative provider contract without persistence
   ).toBe(true);
   expect(
     json.providers.find(
+      (p: { provider: string }) => p.provider === "sec-companyfacts",
+    ).configured,
+  ).toBe(true);
+  expect(
+    json.providers.find(
       (p: { provider: string }) => p.provider === "finra-regsho",
     ).authoritative,
   ).toBe(true);
@@ -25,6 +30,19 @@ test("open data mesh exposes authoritative provider contract without persistence
     json.providers.find((p: { provider: string }) => p.provider === "openbb")
       .authoritative,
   ).toBe(false);
+});
+
+test("manual intelligence cycle forces enabled pipelines without capital authority", async ({
+  request,
+}) => {
+  const response = await request.post("/api/cron/intelligence");
+  expect(response.ok()).toBeTruthy();
+  const json = await response.json();
+  expect(json.forced).toBe(true);
+  expect(json.capitalExecutionEnabled).toBe(false);
+  expect(Object.keys(json.pipelineResults)).toEqual(
+    expect.arrayContaining(["market-snapshots", "sec-filings"]),
+  );
 });
 
 test("open data pull is open and reports a missing database", async ({

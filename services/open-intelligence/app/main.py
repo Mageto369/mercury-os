@@ -22,6 +22,10 @@ FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
 US_EQUITY_EXCHANGES = {"NYSE", "NASDAQ", "XNYS", "XNAS", "NASD"}
 NEW_YORK = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
+DEFAULT_EDGAR_IDENTITY = (
+    "MercuryOS/0.4 personal-research "
+    "https://github.com/Mageto369/mercury-os"
+)
 
 _ticker_records: dict[str, dict[str, Any]] | None = None
 _cik_records: dict[str, dict[str, Any]] | None = None
@@ -58,10 +62,7 @@ def normalize_record(record: Any) -> dict[str, Any]:
 
 
 def configure_edgar() -> str:
-    identity = os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT")
-    if not identity:
-        raise HTTPException(status_code=503, detail="edgar_identity_not_configured")
-    return identity
+    return os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT") or DEFAULT_EDGAR_IDENTITY
 
 
 def provider_get_json(
@@ -264,7 +265,7 @@ def health() -> dict[str, Any]:
             "holidays": package_version("holidays"),
         },
         "configured": {
-            "edgar": bool(os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT")),
+            "edgar": True,
             "fred": bool(os.getenv("FRED_API_KEY")),
         },
     }

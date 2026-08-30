@@ -51,6 +51,50 @@ test("notification mutations are open and require persistence", async ({
   expect(response.status()).toBe(503);
 });
 
+test("operations runs a full cycle and renders the persisted pipeline summary", async ({
+  page,
+}) => {
+  await page.route("**/api/operations/center", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        readiness: { database: true, capitalExecutionEnabled: false },
+        pipelines: [],
+        providers: [],
+        workflows: [],
+        dataQuality: { counts: {}, checks: {}, issueCount: 0 },
+        notifications: { rules: [], deliveries: [] },
+      }),
+    });
+  });
+  await page.route("**/api/cron/intelligence", async (route) => {
+    expect(route.request().method()).toBe("POST");
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        completed: 2,
+        degraded: 1,
+        skipped: 0,
+        pipelineResults: {
+          "sec-filings": { status: "success", error: null },
+          "market-snapshots": {
+            status: "degraded",
+            error: "market-provider: provider_not_configured",
+          },
+        },
+      }),
+    });
+  });
+
+  await page.goto("/operations");
+  await page.getByRole("button", { name: "Run full cycle" }).click();
+  await expect(page.getByRole("heading", { name: "Latest manual cycle" })).toBeVisible();
+  await expect(page.getByText("sec-filings")).toBeVisible();
+  await expect(page.getByText("market-provider: provider_not_configured")).toBeVisible();
+});
+
 test("read APIs retain capital lock when database is present or absent", async ({
   request,
 }) => {

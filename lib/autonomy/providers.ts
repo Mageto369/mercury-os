@@ -19,7 +19,7 @@ export function getProviderReadiness(): Record<ProviderKey, ProviderState> {
   return {
     database: { configured: Boolean(process.env.DATABASE_URL), requiredForAutonomy: true },
     marketData: { configured: marketConfigured, requiredForAutonomy: true },
-    sec: { configured: Boolean(process.env.SEC_USER_AGENT), requiredForAutonomy: false },
+    sec: { configured: true, requiredForAutonomy: false },
     otc: { configured: Boolean(process.env.OTC_MARKETS_API_KEY), requiredForAutonomy: false },
     reddit: { configured: Boolean(process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET), requiredForAutonomy: false },
     discord: { configured: Boolean(process.env.DISCORD_BOT_TOKEN), requiredForAutonomy: false },

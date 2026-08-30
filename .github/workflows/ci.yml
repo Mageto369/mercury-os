@@ -17,6 +17,8 @@ jobs:
       - run: npm audit --audit-level=moderate
       - run: npm run typecheck
       - run: npm run build
+      - run: cp .env.example .env && docker compose config --quiet
+      - run: docker build -t mercury-os-ci .
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
 

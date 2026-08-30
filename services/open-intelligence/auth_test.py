@@ -25,6 +25,9 @@ payload = universe.json()
 assert payload['total'] == 2
 assert [row['symbol'] for row in payload['securities']] == ['AAPL', 'OTCX']
 assert payload['capitalExecutionEnabled'] is False
-assert client.get('/health').status_code == 200
+health = client.get('/health')
+assert health.status_code == 200
+assert health.json()['configured']['edgar'] is True
+assert 'Mageto369/mercury-os' in main_module.configure_edgar()
 
 print('open-intelligence open access: ok')

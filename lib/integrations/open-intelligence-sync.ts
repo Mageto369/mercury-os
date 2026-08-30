@@ -158,7 +158,6 @@ export async function runOpenIntelligenceSync() {
   if(!process.env.OPEN_INTELLIGENCE_URL && !process.env.EDGARTOOLS_URL && !process.env.SEC_CIK_MAPPER_URL && !process.env.FINANCE_DATABASE_URL && !process.env.MARKET_CALENDAR_URL && !process.env.FRED_SIDECAR_URL)
     return {ok:false as const,reason:'open_intelligence_sidecar_not_configured' as const};
   const universe=await syncUniverse();
-  if(!universe.ok)return{...universe,mode:'shadow' as const,capitalExecutionEnabled:false as const};
   const maxSecurities=Math.max(1,Math.min(500,Number(process.env.OPEN_INTELLIGENCE_MAX_SECURITIES ?? 100)));
   const form4Max=Math.max(0,Math.min(100,Number(process.env.EDGAR_FORM4_MAX_COMPANIES ?? 10)));
   const [identities,calendars,macro,form4]=await Promise.all([syncIdentities(maxSecurities),syncCalendars(),syncMacro(),form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,securities:0,inserted:0,errors:[]})]);

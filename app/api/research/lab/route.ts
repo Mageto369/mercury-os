@@ -8,8 +8,7 @@ import {
   countSurvivors,
   summarizeProvenance,
 } from "@/lib/performance/provenance";
-import { adminAuthorized, sameOriginMutation } from "@/lib/admin/security";
-import { toJsonb } from '@/lib/db/json';
+import { toJsonb } from "@/lib/db/json";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -126,16 +125,6 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  if (!sameOriginMutation(request))
-    return NextResponse.json(
-      { ok: false, error: "origin_mismatch" },
-      { status: 403 },
-    );
-  if (!adminAuthorized(request))
-    return NextResponse.json(
-      { ok: false, error: "admin_session_required" },
-      { status: 401 },
-    );
   const parsed = ExperimentSchema.safeParse(
     await request.json().catch(() => null),
   );

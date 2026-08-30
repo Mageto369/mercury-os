@@ -1,15 +1,19 @@
-import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import { NextResponse } from 'next/server';
-import { bearerSecretMatches } from '@/lib/security/request-auth';
-import { z } from 'zod';
-import { getDb } from '@/lib/db';
-import { marketSnapshots, securities } from '@/lib/db/schema';
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getDb } from "@/lib/db";
+import { marketSnapshots, securities } from "@/lib/db/schema";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 const signalSchema = z.object({
-  symbol: z.string().trim().min(1).max(12).transform((value) => value.toUpperCase()),
+  symbol: z
+    .string()
+    .trim()
+    .min(1)
+    .max(12)
+    .transform((value) => value.toUpperCase()),
   price: z.number().positive(),
   volume: z.number().nonnegative(),
   dollarVolume: z.number().nonnegative(),
@@ -19,30 +23,32 @@ const signalSchema = z.object({
   rvol: z.number().min(0).max(1000).optional(),
   floatRotation: z.number().min(0).max(1000).optional(),
   observedAt: z.string().datetime(),
-  source: z.string().trim().min(1).max(80).default('normalized-market-feed'),
+  source: z.string().trim().min(1).max(80).default("normalized-market-feed"),
 });
 
-const bodySchema = z.object({ signals: z.array(signalSchema).min(1).max(1000) });
+const bodySchema = z.object({
+  signals: z.array(signalSchema).min(1).max(1000),
+});
 
 export async function POST(request: Request) {
-  const secret = process.env.MARKET_INGEST_SECRET ?? process.env.CRON_SECRET;
-  if (!secret) {
-    return NextResponse.json({ ok: false, error: 'market_ingest_secret_not_configured' }, { status: 503 });
-  }
-
-  const auth = request.headers.get('authorization');
-  if (!bearerSecretMatches(auth, secret)) {
-    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
-  }
-
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: 'invalid_market_payload', issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "invalid_market_payload",
+        issues: parsed.error.issues,
+      },
+      { status: 400 },
+    );
   }
 
   const db = getDb();
   if (!db) {
-    return NextResponse.json({ ok: false, error: 'database_not_configured' }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, error: "database_not_configured" },
+      { status: 503 },
+    );
   }
 
   let inserted = 0;
@@ -60,11 +66,14 @@ export async function POST(request: Request) {
       continue;
     }
 
-    const spreadBps = signal.spreadBps ?? (
-      signal.bid && signal.ask && signal.ask >= signal.bid
-        ? Math.round(((signal.ask - signal.bid) / ((signal.ask + signal.bid) / 2)) * 10_000)
-        : null
-    );
+    const spreadBps =
+      signal.spreadBps ??
+      (signal.bid && signal.ask && signal.ask >= signal.bid
+        ? Math.round(
+            ((signal.ask - signal.bid) / ((signal.ask + signal.bid) / 2)) *
+              10_000,
+          )
+        : null);
 
     await db.insert(marketSnapshots).values({
       id: randomUUID(),
@@ -76,16 +85,22 @@ export async function POST(request: Request) {
       ask: signal.ask ? String(signal.ask) : null,
       spreadBps,
       rvol: signal.rvol === undefined ? null : String(signal.rvol),
-      floatRotation: signal.floatRotation === undefined ? null : String(signal.floatRotation),
+      floatRotation:
+        signal.floatRotation === undefined
+          ? null
+          : String(signal.floatRotation),
       payload: { source: signal.source },
       observedAt: new Date(signal.observedAt),
     });
     inserted += 1;
   }
 
-  return NextResponse.json({
-    ok: true,
-    inserted,
-    rejectedUnknownSymbols: [...unknownSymbols],
-  }, { status: 202 });
+  return NextResponse.json(
+    {
+      ok: true,
+      inserted,
+      rejectedUnknownSymbols: [...unknownSymbols],
+    },
+    { status: 202 },
+  );
 }

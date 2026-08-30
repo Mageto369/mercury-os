@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from hmac import compare_digest
 from dataclasses import dataclass
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
@@ -13,31 +12,10 @@ import pandas as pd
 import quantstats as qs
 import vectorbt as vbt
 import yfinance as yf
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 app = FastAPI(title="Mercury Research & Proof Sidecar", version="1.0.0")
-
-
-def sidecar_access(authorization: str | None) -> tuple[bool, int, str | None]:
-    expected = os.getenv("MERCURY_SIDECAR_TOKEN")
-    if not expected:
-        return False, 503, "sidecar_token_not_configured"
-    supplied = authorization or ""
-    if not compare_digest(supplied, f"Bearer {expected}"):
-        return False, 401, "unauthorized"
-    return True, 200, None
-
-
-@app.middleware("http")
-async def require_sidecar_token(request: Request, call_next):
-    if request.url.path == "/health":
-        return await call_next(request)
-    allowed, status, detail = sidecar_access(request.headers.get("authorization"))
-    if not allowed:
-        return JSONResponse(status_code=status, content={"detail": detail})
-    return await call_next(request)
 
 
 def package_version(name: str) -> str | None:

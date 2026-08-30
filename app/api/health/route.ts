@@ -7,14 +7,18 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const providers = {
     database: Boolean(process.env.DATABASE_URL),
-    massive: Boolean(process.env.MASSIVE_API_KEY || process.env.MARKET_DATA_API_KEY),
+    massive: Boolean(
+      process.env.MASSIVE_API_KEY || process.env.MARKET_DATA_API_KEY,
+    ),
     intrinio: Boolean(process.env.INTRINIO_API_KEY),
     sec: Boolean(process.env.SEC_USER_AGENT),
     fred: Boolean(process.env.FRED_API_KEY),
     openIntelligence: Boolean(process.env.OPEN_INTELLIGENCE_URL),
     researchProof: Boolean(process.env.RESEARCH_PROOF_URL),
     otc: Boolean(process.env.OTC_MARKETS_API_KEY),
-    reddit: Boolean(process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET),
+    reddit: Boolean(
+      process.env.REDDIT_CLIENT_ID && process.env.REDDIT_CLIENT_SECRET,
+    ),
     discord: Boolean(process.env.DISCORD_BOT_TOKEN),
     telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
     facebook: Boolean(process.env.FACEBOOK_ACCESS_TOKEN),
@@ -37,7 +41,9 @@ export async function GET() {
   if (sql) {
     try {
       const [tables, securities, opportunities, outcomes] = await Promise.all([
-        sql<{ count: number }[]>`select count(*)::int as count from information_schema.tables where table_schema = 'public'`,
+        sql<
+          { count: number }[]
+        >`select count(*)::int as count from information_schema.tables where table_schema = 'public'`,
         sql<{ live: number; validation: number }[]>`
           select
             count(*) filter (where id not like 'validation:%')::int as live,
@@ -67,12 +73,13 @@ export async function GET() {
       };
       schemaReady = warehouse.publicTables >= 48;
     } catch (error) {
-      databaseError = error instanceof Error ? error.message : "database_health_check_failed";
+      databaseError =
+        error instanceof Error ? error.message : "database_health_check_failed";
     }
   }
 
   const runtimeReadiness = {
-    cronSecret: Boolean(process.env.CRON_SECRET),
+    accessMode: "personal-server-open" as const,
     databaseConfigured: Boolean(process.env.DATABASE_URL),
     databaseReachable,
     schemaReady,
@@ -84,7 +91,8 @@ export async function GET() {
     mode: "shadow" as const,
   };
 
-  const requiredRuntimeReady = runtimeReadiness.cronSecret && runtimeReadiness.databaseReachable && runtimeReadiness.schemaReady;
+  const requiredRuntimeReady =
+    runtimeReadiness.databaseReachable && runtimeReadiness.schemaReady;
 
   return NextResponse.json({
     status: databaseError ? "degraded" : "ok",

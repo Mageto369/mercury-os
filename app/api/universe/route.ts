@@ -1,24 +1,37 @@
-import { randomUUID } from 'node:crypto';
-import { asc } from 'drizzle-orm';
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { getDb } from '@/lib/db';
-import { securities } from '@/lib/db/schema';
-import { requireBearerSecret } from '@/lib/security/request-auth';
+import { randomUUID } from "node:crypto";
+import { asc } from "drizzle-orm";
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { getDb } from "@/lib/db";
+import { securities } from "@/lib/db/schema";
 
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
 
 const securitySchema = z.object({
-  symbol: z.string().trim().min(1).max(12).transform((value) => value.toUpperCase()),
+  symbol: z
+    .string()
+    .trim()
+    .min(1)
+    .max(12)
+    .transform((value) => value.toUpperCase()),
   name: z.string().trim().max(200).optional(),
-  market: z.enum(['OTC', 'NASDAQ', 'NYSE', 'AMEX']),
-  cik: z.string().trim().regex(/^\d{1,10}$/).optional(),
+  market: z.enum(["OTC", "NASDAQ", "NYSE", "AMEX"]),
+  cik: z
+    .string()
+    .trim()
+    .regex(/^\d{1,10}$/)
+    .optional(),
 });
 
 export async function GET() {
   const db = getDb();
   if (!db) {
-    return NextResponse.json({ ok: true, persistent: false, securities: [], reason: 'database_not_configured' });
+    return NextResponse.json({
+      ok: true,
+      persistent: false,
+      securities: [],
+      reason: "database_not_configured",
+    });
   }
 
   const rows = await db
@@ -26,25 +39,35 @@ export async function GET() {
     .from(securities)
     .orderBy(asc(securities.symbol));
 
-  return NextResponse.json({ ok: true, persistent: true, securities: rows, count: rows.length });
+  return NextResponse.json({
+    ok: true,
+    persistent: true,
+    securities: rows,
+    count: rows.length,
+  });
 }
 
 export async function POST(request: Request) {
-  const access = requireBearerSecret(request, process.env.CRON_SECRET);
-  if (!access.ok) return NextResponse.json({ ok: false, error: access.reason }, { status: access.status });
-
-  const parsed = securitySchema.safeParse(await request.json().catch(() => null));
+  const parsed = securitySchema.safeParse(
+    await request.json().catch(() => null),
+  );
   if (!parsed.success) {
-    return NextResponse.json({ ok: false, error: 'invalid_security', issues: parsed.error.issues }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: "invalid_security", issues: parsed.error.issues },
+      { status: 400 },
+    );
   }
 
   const db = getDb();
   if (!db) {
-    return NextResponse.json({ ok: false, error: 'database_not_configured' }, { status: 503 });
+    return NextResponse.json(
+      { ok: false, error: "database_not_configured" },
+      { status: 503 },
+    );
   }
 
   const input = parsed.data;
-  const normalizedCik = input.cik ? input.cik.padStart(10, '0') : null;
+  const normalizedCik = input.cik ? input.cik.padStart(10, "0") : null;
   const result = await db
     .insert(securities)
     .values({

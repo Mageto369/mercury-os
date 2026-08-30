@@ -1,22 +1,8 @@
-import os
 from datetime import datetime, timedelta, timezone
 
-from app.main import BacktraderInput, ProofInput, SeriesInput, app, backtrader_challenger, health, quantstats_proof, require_sidecar_token, sidecar_access, vectorbt_experiment
+from app.main import BacktraderInput, ProofInput, SeriesInput, app, backtrader_challenger, health, quantstats_proof, vectorbt_experiment
 
-assert any(middleware.kwargs.get('dispatch') is require_sidecar_token for middleware in app.user_middleware)
-
-original_token = os.environ.pop('MERCURY_SIDECAR_TOKEN', None)
-try:
-    assert sidecar_access('Bearer anything') == (False, 503, 'sidecar_token_not_configured')
-    os.environ['MERCURY_SIDECAR_TOKEN'] = 'mercury-sidecar-smoke-secret'
-    assert sidecar_access(None) == (False, 401, 'unauthorized')
-    assert sidecar_access('Bearer wrong') == (False, 401, 'unauthorized')
-    assert sidecar_access('Bearer mercury-sidecar-smoke-secret') == (True, 200, None)
-finally:
-    if original_token is None:
-        os.environ.pop('MERCURY_SIDECAR_TOKEN', None)
-    else:
-        os.environ['MERCURY_SIDECAR_TOKEN'] = original_token
+assert app.user_middleware == []
 
 base = datetime(2026, 1, 1, tzinfo=timezone.utc)
 ts = [(base + timedelta(days=i)).isoformat() for i in range(40)]

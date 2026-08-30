@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { bootstrapOpenSourceIntelligence } from '@/lib/db/bootstrap-open-source';
 import { callSidecar } from '@/lib/integrations/sidecar-client';
+import { toJsonb } from '@/lib/db/json';
 
 function hash(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -16,6 +17,7 @@ type EquityRef = { symbol:string; found:boolean; records?:Array<Record<string, u
 type Calendar = { exchange:string; sessions:Array<{sessionDate:string;openAt:string;closeAt:string;earlyClose:boolean}>; source:string };
 type Fred = { seriesId:string; observations:Array<{observationDate:string;vintageDate:string;value:number|null}>; source:string };
 type Form4 = { identifier:string; transactions:Array<{accessionNumber?:string|null;filingDate?:string|null;payload:Record<string, unknown>}>; source:string };
+type Universe = { total:number; offset:number; limit:number; securities:Array<{symbol:string;name?:string|null;market:string;cik:string}>; source:string; evidenceClass:string };
 
 export async function getOpenIntelligenceStatus() {
   const url = process.env.OPEN_INTELLIGENCE_URL;
@@ -31,9 +33,39 @@ export async function getOpenIntelligenceStatus() {
   };
 }
 
+async function syncUniverse() {
+  const sql=getSql(); if(!sql) return {ok:false as const,reason:'database_not_configured' as const};
+  const exchanges=(process.env.SEC_UNIVERSE_EXCHANGES ?? 'Nasdaq,NYSE,OTC').split(',').map(x=>x.trim()).filter(Boolean);
+  const pageSize=Math.max(100,Math.min(5000,Number(process.env.SEC_UNIVERSE_PAGE_SIZE ?? 1000)));
+  const maxRows=Math.max(pageSize,Math.min(25000,Number(process.env.SEC_UNIVERSE_MAX_SECURITIES ?? 20000)));
+  let offset=0; let upserted=0; let total=0;
+  while(offset<maxRows){
+    const path=`/reference/universe?exchanges=${encodeURIComponent(exchanges.join(','))}&offset=${offset}&limit=${Math.min(pageSize,maxRows-offset)}`;
+    const result=await callSidecar<Universe>(baseUrl(process.env.SEC_CIK_MAPPER_URL),path);
+    if(!result.ok)return{ok:false as const,reason:result.reason,upserted,total};
+    total=result.data.total;
+    const records=result.data.securities;
+    if(!records.length)break;
+    const q=await sql`WITH source AS (
+      SELECT upper(symbol) AS symbol,name,upper(market) AS market,lpad(cik,10,'0') AS cik
+      FROM jsonb_to_recordset(${toJsonb(records)}::jsonb) AS x(symbol text,name text,market text,cik text)
+    )
+    INSERT INTO securities(id,symbol,name,market,cik,active)
+    SELECT 'sec:'||cik||':'||symbol,symbol,name,market,cik,true FROM source
+    ON CONFLICT(symbol) DO UPDATE SET name=EXCLUDED.name,market=EXCLUDED.market,cik=EXCLUDED.cik,active=true,updated_at=now()
+    RETURNING id`;
+    upserted+=q.length;
+    offset+=records.length;
+    if(offset>=total)break;
+  }
+  return{ok:true as const,source:'sec-company-tickers' as const,exchanges,total,upserted,completedAt:new Date().toISOString()};
+}
+
 async function syncIdentities(limit: number) {
   const sql = getSql(); if (!sql) return { ok:false as const, reason:'database_not_configured' as const };
-  const securities = await sql`SELECT id, symbol FROM securities WHERE active=true ORDER BY symbol LIMIT ${limit}`;
+  const securities = await sql`SELECT s.id, s.symbol FROM securities s
+    LEFT JOIN LATERAL (SELECT max(si.observed_at) AS last_observed_at FROM security_identities si WHERE si.security_id=s.id) latest ON true
+    WHERE s.active=true ORDER BY latest.last_observed_at ASC NULLS FIRST,s.symbol LIMIT ${limit}`;
   let inserted = 0; let enriched = 0; const errors:string[]=[];
   for (const security of securities) {
     const symbol = String(security.symbol).toUpperCase();
@@ -42,7 +74,7 @@ async function syncIdentities(limit: number) {
       const x=identity.data;
       const q=await sql`INSERT INTO security_identities (id,security_id,cik,ticker,issuer_name,exchange,source,evidence_class,payload)
         VALUES (${hash(['cik-map',symbol,x.cik,x.exchange])},${String(security.id)},${x.cik ?? null},${symbol},${x.issuerName ?? null},${x.exchange ?? null},${x.source},${x.evidenceClass},${JSON.stringify(x)}::jsonb)
-        ON CONFLICT DO NOTHING RETURNING id`;
+        ON CONFLICT(id) DO UPDATE SET cik=EXCLUDED.cik,issuer_name=EXCLUDED.issuer_name,exchange=EXCLUDED.exchange,payload=EXCLUDED.payload,observed_at=now() RETURNING id`;
       inserted += q.length;
     } else errors.push(`${symbol}:identity:${identity.reason}`);
 
@@ -125,8 +157,10 @@ export async function runOpenIntelligenceSync() {
   if(!bootstrap.ok) return bootstrap;
   if(!process.env.OPEN_INTELLIGENCE_URL && !process.env.EDGARTOOLS_URL && !process.env.SEC_CIK_MAPPER_URL && !process.env.FINANCE_DATABASE_URL && !process.env.MARKET_CALENDAR_URL && !process.env.FRED_SIDECAR_URL)
     return {ok:false as const,reason:'open_intelligence_sidecar_not_configured' as const};
+  const universe=await syncUniverse();
+  if(!universe.ok)return{...universe,mode:'shadow' as const,capitalExecutionEnabled:false as const};
   const maxSecurities=Math.max(1,Math.min(500,Number(process.env.OPEN_INTELLIGENCE_MAX_SECURITIES ?? 100)));
   const form4Max=Math.max(0,Math.min(100,Number(process.env.EDGAR_FORM4_MAX_COMPANIES ?? 10)));
   const [identities,calendars,macro,form4]=await Promise.all([syncIdentities(maxSecurities),syncCalendars(),syncMacro(),form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,securities:0,inserted:0,errors:[]})]);
-  return {ok:Boolean(identities.ok||calendars.ok||macro.ok||form4.ok),mode:'shadow' as const,capitalExecutionEnabled:false as const,identities,calendars,macro,form4,completedAt:new Date().toISOString()};
+  return {ok:Boolean(universe.ok||identities.ok||calendars.ok||macro.ok||form4.ok),mode:'shadow' as const,capitalExecutionEnabled:false as const,universe,identities,calendars,macro,form4,completedAt:new Date().toISOString()};
 }

@@ -4,6 +4,7 @@ from datetime import date
 from fastapi import HTTPException
 from app.main import (
     app,
+    build_security_universe,
     configure_edgar,
     health,
     market_calendar,
@@ -43,6 +44,17 @@ tickers, ciks = parse_ticker_catalog({
 })
 assert tickers['AAPL']['name'] == 'Apple Inc.'
 assert ciks['0000320193']['ticker'] == 'AAPL'
+
+universe_total, universe = build_security_universe([
+    {'cik': 320193, 'name': 'Apple Inc.', 'ticker': 'aapl', 'exchange': 'Nasdaq'},
+    {'cik': 1067983, 'name': 'Example OTC', 'ticker': 'otcx', 'exchange': 'OTC'},
+    {'cik': 1, 'name': 'Excluded', 'ticker': 'skip', 'exchange': 'CBOE'},
+], {'NASDAQ', 'OTC'}, 0, 10)
+assert universe_total == 2
+assert universe == [
+    {'symbol': 'AAPL', 'name': 'Apple Inc.', 'market': 'NASDAQ', 'cik': '0000320193'},
+    {'symbol': 'OTCX', 'name': 'Example OTC', 'market': 'OTC', 'cik': '0001067983'},
+]
 
 filings = recent_filings({
     'filings': {

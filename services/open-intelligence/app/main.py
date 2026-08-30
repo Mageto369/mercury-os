@@ -143,6 +143,29 @@ def ticker_catalog() -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any
     return _ticker_records, _cik_records
 
 
+def build_security_universe(
+    records: list[dict[str, Any]],
+    exchanges: set[str],
+    offset: int,
+    limit: int,
+) -> tuple[int, list[dict[str, Any]]]:
+    selected: list[dict[str, Any]] = []
+    for record in records:
+        ticker = str(record.get("ticker") or "").upper().strip()
+        exchange = str(record.get("exchange") or "").upper().strip()
+        cik = str(record.get("cik") or "").zfill(10)
+        if not ticker or exchange not in exchanges or not cik.strip("0"):
+            continue
+        selected.append({
+            "symbol": ticker,
+            "name": record.get("name"),
+            "market": "NASDAQ" if exchange == "NASDAQ" else exchange,
+            "cik": cik,
+        })
+    selected.sort(key=lambda row: str(row["symbol"]))
+    return len(selected), selected[offset:offset + limit]
+
+
 def resolve_identifier(identifier: str) -> tuple[str, dict[str, Any] | None]:
     key = identifier.upper().strip()
     by_ticker, by_cik = ticker_catalog()
@@ -283,6 +306,32 @@ def resolve_identity(symbol: str) -> dict[str, Any]:
         "cik": cik,
         "issuerName": record.get("name") if record else None,
         "exchange": record.get("exchange") if record else None,
+        "source": "sec-company-tickers",
+        "evidenceClass": "reference",
+        "mode": "shadow",
+        "capitalExecutionEnabled": False,
+    }
+
+
+@app.get("/reference/universe")
+def reference_universe(
+    exchanges: str = Query("Nasdaq,NYSE,OTC"),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(1000, ge=1, le=5000),
+) -> dict[str, Any]:
+    requested = {value.upper().strip() for value in exchanges.split(",") if value.strip()}
+    try:
+        by_ticker, _ = ticker_catalog()
+        total, securities = build_security_universe(list(by_ticker.values()), requested, offset, limit)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"sec_universe_failed:{exc}") from exc
+    return {
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "securities": securities,
         "source": "sec-company-tickers",
         "evidenceClass": "reference",
         "mode": "shadow",

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
+import { getDatabaseConfig } from "@/lib/db/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const databaseConfig = getDatabaseConfig();
   const providers = {
-    database: Boolean(process.env.DATABASE_URL),
+    database: Boolean(databaseConfig.url),
     massive: Boolean(
       process.env.MASSIVE_API_KEY || process.env.MARKET_DATA_API_KEY,
     ),
@@ -80,7 +82,8 @@ export async function GET() {
 
   const runtimeReadiness = {
     accessMode: "personal-server-open" as const,
-    databaseConfigured: Boolean(process.env.DATABASE_URL),
+    databaseConfigured: Boolean(databaseConfig.url),
+    databaseSource: databaseConfig.source,
     databaseReachable,
     schemaReady,
     marketProviderConfigured: providers.massive || providers.intrinio,

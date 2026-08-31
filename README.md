@@ -43,7 +43,7 @@ No component currently has broker credentials or live capital authority. Capital
 
 ## Supabase activation
 
-Apply both migrations under `supabase/migrations`, then configure the server-side Supabase pooled Postgres connection string as `DATABASE_URL`.
+Apply both migrations under `supabase/migrations`, then configure the server-side Supabase pooled Postgres connection string as `DATABASE_URL` or `POSTGRES_URL`.
 
 The activation path then performs:
 

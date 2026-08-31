@@ -92,7 +92,7 @@ export function deriveSystemState(
     blockers.push({
       key: "database_url",
       label: "Database not configured",
-      remedy: "Set DATABASE_URL to the pooled Postgres connection string.",
+      remedy: "Set DATABASE_URL or POSTGRES_URL to the pooled Postgres connection string.",
     });
   } else if (!reachable) {
     blockers.push({

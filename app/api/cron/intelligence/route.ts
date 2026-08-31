@@ -19,6 +19,7 @@ import {
 import type { IntelligenceJobName } from "@/lib/workflows/jobs";
 
 export const runtime = "nodejs";
+export const maxDuration = 300;
 
 type SafeResult = { ok: false; reason: string } | Record<string, unknown>;
 type RunStatus = "success" | "degraded" | "skipped";

@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: "standalone",
+  // Vercel packages Next.js functions itself. Standalone output is only for
+  // Mercury's Docker image and breaks Vercel's post-build trace collection.
+  output: process.env.VERCEL ? undefined : "standalone",
   async headers() {
     return [
       {

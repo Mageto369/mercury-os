@@ -75,10 +75,13 @@ export async function pullSecCompanyFacts(limit = 25) {
         });
       }
       if (batch.length) {
-        const payload=JSON.stringify(batch);
+        // Encode the JSON as text explicitly. The postgres driver can otherwise
+        // infer a JSON parameter and wrap a pre-serialised array as a JSON string,
+        // which makes jsonb_to_recordset reject it as a non-array.
+        const payloadBase64=Buffer.from(JSON.stringify(batch)).toString('base64');
         const q = await sql`INSERT INTO sec_company_facts (id, security_id, cik, taxonomy, concept, unit, value, form, accession_number, filed_at, period_start, period_end, fiscal_year, fiscal_period, frame, payload)
           SELECT id, security_id, cik, taxonomy, concept, unit, value, form, accession_number, filed_at, period_start, period_end, fiscal_year, fiscal_period, frame, payload
-          FROM jsonb_to_recordset(${payload}::jsonb) AS x(
+          FROM jsonb_to_recordset(convert_from(decode(${payloadBase64}, 'base64'), 'UTF8')::jsonb) AS x(
             id text, security_id text, cik text, taxonomy text, concept text, unit text, value numeric,
             form text, accession_number text, filed_at timestamptz, period_start date, period_end date,
             fiscal_year integer, fiscal_period text, frame text, payload jsonb
@@ -129,10 +132,10 @@ export async function pullFinraRegSho(limit = 5000) {
     }
     let inserted=0;
     if(batch.length) {
-      const payload=JSON.stringify(batch);
+      const payloadBase64=Buffer.from(JSON.stringify(batch)).toString('base64');
       const q=await sql`INSERT INTO finra_regsho_daily (id, security_id, symbol, trade_date, market_code, reporting_facility, total_quantity, short_quantity, short_exempt_quantity, short_ratio, payload)
         SELECT x.id, s.id, x.symbol, x.trade_date, x.market_code, x.reporting_facility, x.total_quantity, x.short_quantity, x.short_exempt_quantity, x.short_ratio, x.payload
-        FROM jsonb_to_recordset(${payload}::jsonb) AS x(
+        FROM jsonb_to_recordset(convert_from(decode(${payloadBase64}, 'base64'), 'UTF8')::jsonb) AS x(
           id text, symbol text, trade_date date, market_code text, reporting_facility text,
           total_quantity numeric, short_quantity numeric, short_exempt_quantity numeric, short_ratio numeric, payload jsonb
         )

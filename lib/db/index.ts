@@ -2,12 +2,13 @@ import postgres from "postgres";
 import { drizzle } from "drizzle-orm/postgres-js";
 import * as coreSchema from "@/lib/db/schema";
 import * as opsSchema from "@/lib/db/ops-schema";
+import { getDatabaseConfig } from "@/lib/db/config";
 
 const schema = { ...coreSchema, ...opsSchema };
 let sqlClient: ReturnType<typeof postgres> | null = null;
 
 export function getSql() {
-  const url = process.env.DATABASE_URL;
+  const { url } = getDatabaseConfig();
   if (!url) return null;
   if (!sqlClient) {
     sqlClient = postgres(url, {

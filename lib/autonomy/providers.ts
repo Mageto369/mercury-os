@@ -1,3 +1,5 @@
+import { isDatabaseConfigured } from '@/lib/db/config';
+
 export type ProviderKey =
   | 'database'
   | 'marketData'
@@ -17,7 +19,7 @@ export interface ProviderState {
 export function getProviderReadiness(): Record<ProviderKey, ProviderState> {
   const marketConfigured = Boolean(process.env.MASSIVE_API_KEY || process.env.INTRINIO_API_KEY || process.env.MARKET_DATA_API_KEY);
   return {
-    database: { configured: Boolean(process.env.DATABASE_URL), requiredForAutonomy: true },
+    database: { configured: isDatabaseConfigured(), requiredForAutonomy: true },
     marketData: { configured: marketConfigured, requiredForAutonomy: true },
     sec: { configured: true, requiredForAutonomy: false },
     otc: { configured: Boolean(process.env.OTC_MARKETS_API_KEY), requiredForAutonomy: false },

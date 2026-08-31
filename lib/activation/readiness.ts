@@ -31,7 +31,7 @@ export async function getProductionReadiness() {
       key: 'database', label: 'Persistent warehouse', maxScore: 20,
       score: providers.database.configured ? 20 : 0,
       status: providers.database.configured ? 'ready' : 'blocked',
-      detail: providers.database.configured ? 'DATABASE_URL configured.' : 'DATABASE_URL missing.',
+      detail: providers.database.configured ? 'Database connection configured.' : 'Set DATABASE_URL or POSTGRES_URL.',
     },
     {
       key: 'market', label: 'Live market intelligence', maxScore: 20,

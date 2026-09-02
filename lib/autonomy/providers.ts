@@ -27,7 +27,7 @@ export function getProviderReadiness(): Record<ProviderKey, ProviderState> {
     discord: { configured: Boolean(process.env.DISCORD_BOT_TOKEN), requiredForAutonomy: false },
     telegram: { configured: Boolean(process.env.TELEGRAM_BOT_TOKEN), requiredForAutonomy: false },
     facebook: { configured: Boolean(process.env.FACEBOOK_ACCESS_TOKEN), requiredForAutonomy: false },
-    ai: { configured: Boolean(process.env.OPENAI_API_KEY), requiredForAutonomy: false },
+    ai: { configured: Boolean(process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.DEEPSEEK_API_KEY || process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY), requiredForAutonomy: false },
   };
 }
 

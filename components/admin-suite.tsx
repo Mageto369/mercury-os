@@ -17,6 +17,8 @@ type CatalogItem = {
   displayName: string;
   capabilities: readonly string[];
   secretName: string;
+  defaultBaseUrl?: string;
+  defaultModel?: string;
 };
 type SavedIntegration = {
   id: string;
@@ -285,8 +287,12 @@ function IntegrationCard({
   onSaved: () => Promise<void>;
 }) {
   const [enabled, setEnabled] = useState(saved?.enabled ?? false);
-  const [baseUrl, setBaseUrl] = useState(saved?.base_url ?? "");
-  const [model, setModel] = useState(saved?.model ?? "");
+  const [baseUrl, setBaseUrl] = useState(
+    saved?.base_url ?? item.defaultBaseUrl ?? "",
+  );
+  const [model, setModel] = useState(
+    saved?.model ?? item.defaultModel ?? "",
+  );
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -340,7 +346,7 @@ function IntegrationCard({
         <label>
           Model
           <input
-            placeholder="e.g. gpt-5"
+            placeholder={item.defaultModel ?? "e.g. gpt-5"}
             value={model}
             onChange={(e) => setModel(e.target.value)}
           />
@@ -350,7 +356,7 @@ function IntegrationCard({
         <label>
           Base URL
           <input
-            placeholder="Optional service URL"
+            placeholder={item.defaultBaseUrl ?? "Optional service URL"}
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
           />

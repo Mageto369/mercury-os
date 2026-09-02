@@ -19,6 +19,17 @@ export function normalizeSidecarTimestamp(value: string) {
   return timestamp.toISOString();
 }
 
+export function summarizeProviderBatch(
+  label: string,
+  attempted: number,
+  failed: number,
+) {
+  const ok = attempted === 0 || failed < attempted;
+  return ok
+    ? { ok: true as const }
+    : { ok: false as const, reason: `all_${label}_requests_failed` };
+}
+
 async function safeSync<T>(operation: () => Promise<T>) {
   try {
     return await operation();
@@ -107,7 +118,7 @@ async function syncIdentities(limit: number) {
       }
     }
   }
-  return {ok:true as const, securities:securities.length, identityRowsInserted:inserted, referenceRowsInserted:enriched, errors};
+  return {...summarizeProviderBatch('identity', securities.length, errors.length), securities:securities.length, identityRowsInserted:inserted, referenceRowsInserted:enriched, errors};
 }
 
 async function syncCalendars() {
@@ -127,7 +138,7 @@ async function syncCalendars() {
       inserted+=q.length;
     }
   }
-  return {ok:true as const,exchanges,inserted,errors};
+  return {...summarizeProviderBatch('calendar', exchanges.length, errors.length),exchanges,inserted,errors};
 }
 
 async function syncMacro() {
@@ -147,7 +158,7 @@ async function syncMacro() {
       inserted+=q.length;
     }
   }
-  return {ok:true as const,series,inserted,errors};
+  return {...summarizeProviderBatch('macro', series.length, errors.length),series,inserted,errors};
 }
 
 async function syncForm4(limit: number) {
@@ -166,7 +177,7 @@ async function syncForm4(limit: number) {
       inserted+=q.length;
     }
   }
-  return {ok:true as const,securities:rows.length,inserted,errors};
+  return {...summarizeProviderBatch('form4', rows.length, errors.length),securities:rows.length,inserted,errors};
 }
 
 export async function runOpenIntelligenceSync() {

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+from csv import DictReader
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from importlib.metadata import PackageNotFoundError, version
+from io import StringIO
 from typing import Any
 from xml.etree import ElementTree
 from zoneinfo import ZoneInfo
@@ -19,6 +21,7 @@ SEC_TICKERS_URL = "https://www.sec.gov/files/company_tickers_exchange.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik}.json"
 SEC_ARCHIVES_URL = "https://www.sec.gov/Archives/edgar/data/{cik}/{accession}/{document}"
 FRED_OBSERVATIONS_URL = "https://api.stlouisfed.org/fred/series/observations"
+FRED_CSV_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
 US_EQUITY_EXCHANGES = {"NYSE", "NASDAQ", "XNYS", "XNAS", "NASD"}
 NEW_YORK = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
@@ -79,8 +82,19 @@ def provider_get_json(
     return payload
 
 
-def provider_get_text(url: str, *, headers: dict[str, str] | None = None) -> str:
-    response = httpx.get(url, headers=headers, timeout=20, follow_redirects=True)
+def provider_get_text(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> str:
+    response = httpx.get(
+        url,
+        params=params,
+        headers=headers,
+        timeout=20,
+        follow_redirects=True,
+    )
     response.raise_for_status()
     return response.text
 
@@ -253,6 +267,31 @@ def parse_fred_observations(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def parse_fred_csv(
+    payload: str,
+    series_id: str,
+    vintage_date: str,
+) -> list[dict[str, Any]]:
+    reader = DictReader(StringIO(payload))
+    if not reader.fieldnames or "observation_date" not in reader.fieldnames:
+        raise ValueError("invalid_fred_csv")
+    value_field = next(
+        (field for field in reader.fieldnames if field != "observation_date"),
+        None,
+    )
+    if value_field is None or value_field.upper() != series_id.upper():
+        raise ValueError("invalid_fred_csv_series")
+    rows: list[dict[str, Any]] = []
+    for observation in reader:
+        raw_value = observation.get(value_field)
+        rows.append({
+            "observationDate": observation.get("observation_date"),
+            "vintageDate": vintage_date,
+            "value": None if raw_value in (None, "", ".") else float(raw_value),
+        })
+    return rows
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
     return {
@@ -266,7 +305,8 @@ def health() -> dict[str, Any]:
         },
         "configured": {
             "edgar": True,
-            "fred": bool(os.getenv("FRED_API_KEY")),
+            "fred": True,
+            "fredApiKey": bool(os.getenv("FRED_API_KEY")),
         },
     }
 
@@ -393,29 +433,40 @@ def fred_series(
     vintage_date: str | None = None,
 ) -> dict[str, Any]:
     key = os.getenv("FRED_API_KEY")
-    if not key:
-        raise HTTPException(status_code=503, detail="fred_api_key_not_configured")
-    params: dict[str, Any] = {
-        "series_id": series_id,
-        "api_key": key,
-        "file_type": "json",
-    }
-    if start:
-        params["observation_start"] = start
-    if end:
-        params["observation_end"] = end
-    if vintage_date:
-        params["realtime_start"] = vintage_date
-        params["realtime_end"] = vintage_date
     try:
-        payload = provider_get_json(FRED_OBSERVATIONS_URL, params=params)
-        rows = parse_fred_observations(payload)
+        if key:
+            params: dict[str, Any] = {
+                "series_id": series_id,
+                "api_key": key,
+                "file_type": "json",
+            }
+            if start:
+                params["observation_start"] = start
+            if end:
+                params["observation_end"] = end
+            if vintage_date:
+                params["realtime_start"] = vintage_date
+                params["realtime_end"] = vintage_date
+            payload = provider_get_json(FRED_OBSERVATIONS_URL, params=params)
+            rows = parse_fred_observations(payload)
+            source = "fred-alfred"
+        else:
+            if vintage_date:
+                raise ValueError("fred_api_key_required_for_historical_vintage")
+            csv_params: dict[str, Any] = {"id": series_id}
+            if start:
+                csv_params["cosd"] = start
+            if end:
+                csv_params["coed"] = end
+            payload = provider_get_text(FRED_CSV_URL, params=csv_params)
+            rows = parse_fred_csv(payload, series_id, date.today().isoformat())
+            source = "fred-csv"
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"fred_failed:{exc}") from exc
     return {
         "seriesId": series_id,
         "observations": rows,
-        "source": "fred-alfred",
+        "source": source,
         "evidenceClass": "authoritative",
         "mode": "shadow",
         "capitalExecutionEnabled": False,

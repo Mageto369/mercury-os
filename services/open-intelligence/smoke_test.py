@@ -1,4 +1,6 @@
+import os
 from datetime import date
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from app.main import (
@@ -9,9 +11,11 @@ from app.main import (
     market_calendar,
     normalize_record,
     parse_form4_xml,
+    parse_fred_csv,
     parse_fred_observations,
     parse_ticker_catalog,
     recent_filings,
+    fred_series,
 )
 
 assert app.user_middleware == []
@@ -85,6 +89,25 @@ fred = parse_fred_observations({'observations': [
 ]})
 assert fred[0]['value'] == 123.4
 assert fred[1]['value'] is None
+
+fred_csv = parse_fred_csv(
+    'observation_date,DFF\n2026-01-01,3.64\n2026-01-02,.\n',
+    'DFF',
+    '2026-01-03',
+)
+assert fred_csv == [
+    {'observationDate': '2026-01-01', 'vintageDate': '2026-01-03', 'value': 3.64},
+    {'observationDate': '2026-01-02', 'vintageDate': '2026-01-03', 'value': None},
+]
+
+with patch.dict(os.environ, {'FRED_API_KEY': ''}), patch(
+    'app.main.provider_get_text',
+    return_value='observation_date,DFF\n2026-01-01,3.64\n',
+):
+    keyless_fred = fred_series('DFF', start='2026-01-01', end='2026-01-02')
+assert keyless_fred['source'] == 'fred-csv'
+assert keyless_fred['observations'][0]['value'] == 3.64
+assert keyless_fred['capitalExecutionEnabled'] is False
 
 calendar = market_calendar('NYSE', date(2026, 1, 2), date(2026, 1, 9))
 assert calendar['exchange'] == 'NYSE'

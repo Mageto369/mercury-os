@@ -183,11 +183,21 @@ async function runIntelligenceCycle(force = false) {
       { name: "corporate-action-agent", result: assignment("finra-actions") },
     ]),
     "share-structure": summarizePipeline([
-      { name: "open-intelligence", result: openIntelligenceRefresh },
+      {
+        name: "open-intelligence-identities",
+        result: nestedResult(openIntelligenceRefresh, "identities"),
+      },
+      {
+        name: "open-intelligence-form4",
+        result: nestedResult(openIntelligenceRefresh, "form4"),
+      },
       { name: "share-structure-agent", result: assignment("share-structure") },
     ]),
     "macro-series": summarizePipeline([
-      { name: "open-intelligence", result: openIntelligenceRefresh },
+      {
+        name: "open-intelligence-macro",
+        result: nestedResult(openIntelligenceRefresh, "macro"),
+      },
     ]),
     "social-radar": summarizePipeline([
       { name: "social-radar-agent", result: assignment("social-radar") },

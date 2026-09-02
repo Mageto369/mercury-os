@@ -12,6 +12,24 @@ function baseUrl(specific?: string) {
   return specific || process.env.OPEN_INTELLIGENCE_URL;
 }
 
+export function normalizeSidecarTimestamp(value: string) {
+  const timestamp = new Date(value);
+  if (!Number.isFinite(timestamp.getTime()))
+    throw new Error(`invalid_sidecar_timestamp:${value}`);
+  return timestamp.toISOString();
+}
+
+async function safeSync<T>(operation: () => Promise<T>) {
+  try {
+    return await operation();
+  } catch (error) {
+    return {
+      ok: false as const,
+      reason: error instanceof Error ? error.message : 'open_intelligence_sync_failed',
+    };
+  }
+}
+
 type Identity = { symbol:string; cik?:string|null; issuerName?:string|null; exchange?:string|null; source:string; evidenceClass:string };
 type EquityRef = { symbol:string; found:boolean; records?:Array<Record<string, unknown>>; source:string; evidenceClass:string };
 type Calendar = { exchange:string; sessions:Array<{sessionDate:string;openAt:string;closeAt:string;earlyClose:boolean}>; source:string };
@@ -104,7 +122,7 @@ async function syncCalendars() {
     if(!result.ok){errors.push(`${exchange}:${result.reason}`);continue;}
     for(const session of result.data.sessions){
       const q=await sql`INSERT INTO market_sessions (id,exchange,session_date,open_at,close_at,early_close,source,payload)
-        VALUES (${hash(['calendar',exchange,session.sessionDate])},${exchange},${session.sessionDate},${new Date(session.openAt)},${new Date(session.closeAt)},${session.earlyClose},${result.data.source},${JSON.stringify(session)}::jsonb)
+        VALUES (${hash(['calendar',exchange,session.sessionDate])},${exchange},${session.sessionDate},${normalizeSidecarTimestamp(session.openAt)},${normalizeSidecarTimestamp(session.closeAt)},${session.earlyClose},${result.data.source},${toJsonb(session)}::jsonb)
         ON CONFLICT (exchange,session_date) DO UPDATE SET open_at=EXCLUDED.open_at,close_at=EXCLUDED.close_at,early_close=EXCLUDED.early_close,source=EXCLUDED.source,payload=EXCLUDED.payload RETURNING id`;
       inserted+=q.length;
     }
@@ -157,9 +175,14 @@ export async function runOpenIntelligenceSync() {
   if(!bootstrap.ok) return bootstrap;
   if(!process.env.OPEN_INTELLIGENCE_URL && !process.env.EDGARTOOLS_URL && !process.env.SEC_CIK_MAPPER_URL && !process.env.FINANCE_DATABASE_URL && !process.env.MARKET_CALENDAR_URL && !process.env.FRED_SIDECAR_URL)
     return {ok:false as const,reason:'open_intelligence_sidecar_not_configured' as const};
-  const universe=await syncUniverse();
+  const universe=await safeSync(syncUniverse);
   const maxSecurities=Math.max(1,Math.min(500,Number(process.env.OPEN_INTELLIGENCE_MAX_SECURITIES ?? 100)));
   const form4Max=Math.max(0,Math.min(100,Number(process.env.EDGAR_FORM4_MAX_COMPANIES ?? 10)));
-  const [identities,calendars,macro,form4]=await Promise.all([syncIdentities(maxSecurities),syncCalendars(),syncMacro(),form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,securities:0,inserted:0,errors:[]})]);
+  const [identities,calendars,macro,form4]=await Promise.all([
+    safeSync(() => syncIdentities(maxSecurities)),
+    safeSync(syncCalendars),
+    safeSync(syncMacro),
+    safeSync(() => form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,securities:0,inserted:0,errors:[]})),
+  ]);
   return {ok:Boolean(universe.ok||identities.ok||calendars.ok||macro.ok||form4.ok),mode:'shadow' as const,capitalExecutionEnabled:false as const,universe,identities,calendars,macro,form4,completedAt:new Date().toISOString()};
 }

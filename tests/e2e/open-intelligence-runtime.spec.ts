@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { normalizeSidecarTimestamp } from "@/lib/integrations/open-intelligence-sync";
+import {
+  normalizeSidecarTimestamp,
+  summarizeProviderBatch,
+} from "@/lib/integrations/open-intelligence-sync";
 
 test("sidecar calendar timestamps stay primitive across the Postgres boundary", () => {
   const openAt = normalizeSidecarTimestamp("2026-09-02T13:30:00-04:00");
@@ -14,4 +17,20 @@ test("invalid sidecar calendar timestamps fail explicitly", () => {
   expect(() => normalizeSidecarTimestamp("not-a-timestamp")).toThrow(
     "invalid_sidecar_timestamp:not-a-timestamp",
   );
+});
+
+test("provider batches fail when every attempted request fails", () => {
+  expect(summarizeProviderBatch("macro", 5, 5)).toEqual({
+    ok: false,
+    reason: "all_macro_requests_failed",
+  });
+  expect(summarizeProviderBatch("identity", 100, 100)).toEqual({
+    ok: false,
+    reason: "all_identity_requests_failed",
+  });
+});
+
+test("provider batches accept partial success and empty work", () => {
+  expect(summarizeProviderBatch("macro", 5, 4)).toEqual({ ok: true });
+  expect(summarizeProviderBatch("form4", 0, 0)).toEqual({ ok: true });
 });

@@ -8,6 +8,8 @@ export const integrationCatalog = [
   { id:'openai', category:'llm', provider:'openai', displayName:'OpenAI', capabilities:['reasoning','classification','summarization'], secretName:'api_key' },
   { id:'anthropic', category:'llm', provider:'anthropic', displayName:'Anthropic', capabilities:['reasoning','summarization'], secretName:'api_key' },
   { id:'gemini', category:'llm', provider:'gemini', displayName:'Google Gemini', capabilities:['reasoning','classification'], secretName:'api_key' },
+  { id:'deepseek', category:'llm', provider:'deepseek', displayName:'DeepSeek', capabilities:['reasoning','classification','summarization'], secretName:'api_key', defaultBaseUrl:'https://api.deepseek.com', defaultModel:'deepseek-v4-pro' },
+  { id:'kimi', category:'llm', provider:'kimi', displayName:'Kimi K2 (Moonshot AI)', capabilities:['reasoning','classification','summarization'], secretName:'api_key', defaultBaseUrl:'https://api.moonshot.ai/v1', defaultModel:'kimi-k2.6' },
 ] as const;
 
 export const ingestionCatalog = [

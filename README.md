@@ -90,6 +90,19 @@ Configure `DATABASE_URL` first. Then add provider credentials from
 `.env.example` as needed. Vercel invokes the cadence-aware intelligence route
 every minute.
 
+## AI providers
+
+The Admin Integrations page configures OpenAI, Anthropic, Gemini, DeepSeek, and
+Kimi. DeepSeek defaults to `https://api.deepseek.com` with
+`deepseek-v4-pro`. Kimi K2 defaults to `https://api.moonshot.ai/v1` with
+`kimi-k2.6`. Both the base URL and model remain editable.
+
+Credentials can be entered in Admin or supplied as server environment
+variables. DeepSeek reads `DEEPSEEK_API_KEY`. Kimi reads
+`MOONSHOT_API_KEY`, with `KIMI_API_KEY` accepted as an alias. The AI workspace
+can select either provider directly, while Auto router falls through enabled
+providers when one is unavailable.
+
 ## Validation gate
 
 Every main-branch release runs:

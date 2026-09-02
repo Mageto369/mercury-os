@@ -14,7 +14,7 @@ const Schema = z.object({
     .transform((v) => v.toUpperCase()),
   question: z.string().trim().min(1).max(8000),
   mode: z.enum(["copilot", "debate", "agent-room"]).default("copilot"),
-  provider: z.enum(["openai", "anthropic", "gemini"]).optional(),
+  provider: z.enum(["openai", "anthropic", "gemini", "deepseek", "kimi"]).optional(),
 });
 
 type LlmRun = Awaited<ReturnType<typeof runLlm>>;

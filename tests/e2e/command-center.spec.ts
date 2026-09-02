@@ -165,7 +165,9 @@ test("shadow APIs, ingestion boundaries and cron remain safe without providers",
   expect(healthJson.status).toBe("ok");
   expect(healthJson.service).toBe("mercury-os");
   expect(healthJson.version).toBe("0.4.0");
-  expect(healthJson.totalProviders).toBe(13);
+  expect(healthJson.totalProviders).toBe(17);
+  expect(healthJson.providers.deepseek).toBe(false);
+  expect(healthJson.providers.kimi).toBe(false);
   expect(healthJson.runtime.mode).toBe("shadow");
   expect(healthJson.runtime.capitalExecutionEnabled).toBe(false);
   expect(healthJson.runtime.databaseConfigured).toBe(false);

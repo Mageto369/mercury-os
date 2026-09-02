@@ -24,10 +24,13 @@ export async function GET() {
     discord: Boolean(process.env.DISCORD_BOT_TOKEN),
     telegram: Boolean(process.env.TELEGRAM_BOT_TOKEN),
     facebook: Boolean(process.env.FACEBOOK_ACCESS_TOKEN),
-    ai: Boolean(process.env.OPENAI_API_KEY),
+    openai: Boolean(process.env.OPENAI_API_KEY),
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+    gemini: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
+    deepseek: Boolean(process.env.DEEPSEEK_API_KEY),
+    kimi: Boolean(process.env.MOONSHOT_API_KEY || process.env.KIMI_API_KEY),
   };
 
-  const configured = Object.values(providers).filter(Boolean).length;
   const sql = getSql();
   let databaseReachable = false;
   let schemaReady = false;
@@ -42,6 +45,31 @@ export async function GET() {
 
   if (sql) {
     try {
+      const llmRows = await sql<
+        { id: string; enabled: boolean; model: string | null; secret_configured: boolean }[]
+      >`select c.id,c.enabled,c.model,exists(select 1 from integration_secrets s where s.integration_id=c.id and s.secret_name='api_key') as secret_configured from integration_configs c where c.id in ('openai','anthropic','gemini','deepseek','kimi')`;
+      for (const row of llmRows) {
+        if (row.id === "openai")
+          providers.openai = Boolean(
+            row.enabled && row.model && (row.secret_configured || providers.openai),
+          );
+        if (row.id === "anthropic")
+          providers.anthropic = Boolean(
+            row.enabled && row.model && (row.secret_configured || providers.anthropic),
+          );
+        if (row.id === "gemini")
+          providers.gemini = Boolean(
+            row.enabled && row.model && (row.secret_configured || providers.gemini),
+          );
+        if (row.id === "deepseek")
+          providers.deepseek = Boolean(
+            row.enabled && row.model && (row.secret_configured || providers.deepseek),
+          );
+        if (row.id === "kimi")
+          providers.kimi = Boolean(
+            row.enabled && row.model && (row.secret_configured || providers.kimi),
+          );
+      }
       const [tables, securities, opportunities, outcomes] = await Promise.all([
         sql<
           { count: number }[]
@@ -96,6 +124,7 @@ export async function GET() {
 
   const requiredRuntimeReady =
     runtimeReadiness.databaseReachable && runtimeReadiness.schemaReady;
+  const configured = Object.values(providers).filter(Boolean).length;
 
   return NextResponse.json({
     status: databaseError ? "degraded" : "ok",

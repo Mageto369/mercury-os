@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { bootstrapOpenSourceIntelligence } from '@/lib/db/bootstrap-open-source';
 import { callSidecar } from '@/lib/integrations/sidecar-client';
-import { toJsonb } from '@/lib/db/json';
+import { toJsonb, toJsonbBase64 } from '@/lib/db/json';
 
 function hash(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -194,10 +194,11 @@ async function syncMacro() {
   const observations=batches.flat();
   let inserted=0;
   if(observations.length){
+    const payloadBase64=toJsonbBase64(observations);
     const q=await sql`INSERT INTO macro_observations
         (id,series_id,observation_date,vintage_date,value,source,authoritative,payload)
       SELECT id,series_id,observation_date,vintage_date,value,source,true,payload
-      FROM jsonb_to_recordset(${toJsonb(observations)}::jsonb) AS x(
+      FROM jsonb_to_recordset(convert_from(decode(${payloadBase64},'base64'),'UTF8')::jsonb) AS x(
         id text,series_id text,observation_date date,vintage_date date,value numeric,source text,payload jsonb)
       ON CONFLICT (series_id,observation_date,vintage_date) DO UPDATE
         SET value=EXCLUDED.value,source=EXCLUDED.source,payload=EXCLUDED.payload

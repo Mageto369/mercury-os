@@ -12,3 +12,7 @@
 export function toJsonb(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
+
+export function toJsonbBase64(value: unknown): string {
+  return Buffer.from(toJsonb(value), "utf8").toString("base64");
+}

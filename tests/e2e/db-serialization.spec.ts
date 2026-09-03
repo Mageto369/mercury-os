@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { toJsonb } from '../../lib/db/json';
+import { toJsonb, toJsonbBase64 } from '../../lib/db/json';
 
 // Regression guard. sql.json() reached the driver unrecognised under the Next.js
 // production bundle and threw ERR_INVALID_ARG_TYPE, which turned the entire cron
@@ -20,4 +20,10 @@ test('null and undefined both become JSON null rather than throwing', () => {
 test('nested values survive a round trip', () => {
   const value = { nested: { list: [1, 2, 3], flag: true }, when: '2026-08-28T00:00:00.000Z' };
   expect(JSON.parse(toJsonb(value))).toEqual(value);
+});
+
+test('base64 transport preserves JSON arrays for Postgres bulk operations', () => {
+  const value = [{ series_id: 'DFF', value: 3.63 }, { series_id: 'DGS10', value: null }];
+  const decoded = Buffer.from(toJsonbBase64(value), 'base64').toString('utf8');
+  expect(JSON.parse(decoded)).toEqual(value);
 });

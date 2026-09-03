@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   identityProviderUrls,
+  isProviderOutage,
   normalizeSidecarTimestamp,
   summarizeProviderBatch,
 } from "@/lib/integrations/open-intelligence-sync";
@@ -48,4 +49,13 @@ test("identity enrichment only uses dedicated provider URLs", () => {
     mapperUrl:"https://mapper.example",
     financeUrl:"https://finance.example",
   });
+});
+
+test("provider outage classification only trips on transport and server failures", () => {
+  expect(isProviderOutage("http_502")).toBe(true);
+  expect(isProviderOutage("http_503")).toBe(true);
+  expect(isProviderOutage("fetch failed")).toBe(true);
+  expect(isProviderOutage("The operation was aborted")).toBe(true);
+  expect(isProviderOutage("http_404")).toBe(false);
+  expect(isProviderOutage("sidecar_invalid_json")).toBe(true);
 });

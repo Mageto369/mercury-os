@@ -39,6 +39,10 @@ export function identityProviderUrls(
   };
 }
 
+export function isProviderOutage(reason: string) {
+  return /^(http_5\d\d|fetch failed|sidecar_|The operation was aborted)/i.test(reason);
+}
+
 async function safeSync<T>(operation: () => Promise<T>) {
   try {
     return await operation();
@@ -176,17 +180,29 @@ async function syncMacro() {
   const series=(process.env.FRED_SERIES_IDS ?? 'DFF,DGS2,DGS10,VIXCLS,DTWEXBGS').split(',').map(x=>x.trim()).filter(Boolean);
   const lookback=Math.max(30,Math.min(3650,Number(process.env.FRED_LOOKBACK_DAYS ?? 730)));
   const end=new Date(); const start=new Date(Date.now()-lookback*86_400_000);
-  let inserted=0; const errors:string[]=[];
-  for(const id of series){
+  const errors:string[]=[];
+  const batches=await Promise.all(series.map(async(id)=>{
     const path=`/fred/${encodeURIComponent(id)}?start=${start.toISOString().slice(0,10)}&end=${end.toISOString().slice(0,10)}`;
     const result=await callSidecar<Fred>(baseUrl(process.env.FRED_SIDECAR_URL),path);
-    if(!result.ok){errors.push(`${id}:${result.reason}`);continue;}
-    for(const obs of result.data.observations){
-      const q=await sql`INSERT INTO macro_observations (id,series_id,observation_date,vintage_date,value,source,authoritative,payload)
-        VALUES (${hash(['fred',id,obs.observationDate,obs.vintageDate])},${id},${obs.observationDate},${obs.vintageDate},${obs.value},${result.data.source},true,${JSON.stringify(obs)}::jsonb)
-        ON CONFLICT (series_id,observation_date,vintage_date) DO UPDATE SET value=EXCLUDED.value,payload=EXCLUDED.payload RETURNING id`;
-      inserted+=q.length;
-    }
+    if(!result.ok){errors.push(`${id}:${result.reason}`);return [];}
+    return result.data.observations.map((obs)=>({
+      id:hash(['fred',id,obs.observationDate,obs.vintageDate]),series_id:id,
+      observation_date:obs.observationDate,vintage_date:obs.vintageDate,value:obs.value,
+      source:result.data.source,payload:obs,
+    }));
+  }));
+  const observations=batches.flat();
+  let inserted=0;
+  if(observations.length){
+    const q=await sql`INSERT INTO macro_observations
+        (id,series_id,observation_date,vintage_date,value,source,authoritative,payload)
+      SELECT id,series_id,observation_date,vintage_date,value,source,true,payload
+      FROM jsonb_to_recordset(${toJsonb(observations)}::jsonb) AS x(
+        id text,series_id text,observation_date date,vintage_date date,value numeric,source text,payload jsonb)
+      ON CONFLICT (series_id,observation_date,vintage_date) DO UPDATE
+        SET value=EXCLUDED.value,source=EXCLUDED.source,payload=EXCLUDED.payload
+      RETURNING id`;
+    inserted=q.length;
   }
   return {...summarizeProviderBatch('macro', series.length, errors.length),series,inserted,errors};
 }
@@ -194,20 +210,30 @@ async function syncMacro() {
 async function syncForm4(limit: number) {
   const sql=getSql(); if(!sql) return {ok:false as const,reason:'database_not_configured' as const};
   const rows=await sql`SELECT id,symbol,cik FROM securities WHERE active=true AND cik IS NOT NULL ORDER BY symbol LIMIT ${limit}`;
-  let inserted=0; const errors:string[]=[];
+  const circuitThreshold=Math.max(1,Math.min(5,Number(process.env.SIDECAR_CIRCUIT_FAILURES ?? 2)));
+  let inserted=0; let attempted=0; let consecutiveOutages=0; const errors:string[]=[];
   for(const security of rows){
     const symbol=String(security.symbol);
+    attempted+=1;
     const result=await callSidecar<Form4>(baseUrl(process.env.EDGARTOOLS_URL),`/edgar/form4/${encodeURIComponent(symbol)}?limit=10`);
-    if(!result.ok){errors.push(`${symbol}:${result.reason}`);continue;}
+    if(!result.ok){
+      errors.push(`${symbol}:${result.reason}`);
+      consecutiveOutages=isProviderOutage(result.reason)?consecutiveOutages+1:0;
+      if(consecutiveOutages>=circuitThreshold)break;
+      continue;
+    }
+    consecutiveOutages=0;
     for(const tx of result.data.transactions){
       const accession=tx.accessionNumber ?? null;
       const q=await sql`INSERT INTO insider_transactions (id,security_id,cik,accession_number,transaction_date,source,payload)
-        VALUES (${hash(['form4',security.id,accession,tx.filingDate,tx.payload])},${String(security.id)},${String(security.cik)},${accession},${tx.filingDate || null},${result.data.source},${JSON.stringify(tx.payload)}::jsonb)
+        VALUES (${hash(['form4',security.id,accession,tx.filingDate,tx.payload])},${String(security.id)},${String(security.cik)},${accession},${tx.filingDate || null},${result.data.source},${toJsonb(tx.payload)}::jsonb)
         ON CONFLICT DO NOTHING RETURNING id`;
       inserted+=q.length;
     }
   }
-  return {...summarizeProviderBatch('form4', rows.length, errors.length),securities:rows.length,inserted,errors};
+  const batch=summarizeProviderBatch('form4', attempted, errors.length);
+  const skipped=Math.max(0,rows.length-attempted);
+  return {...batch,status:errors.length?'degraded' as const:'success' as const,securities:rows.length,attempted,skipped,circuitOpen:skipped>0,inserted,errors};
 }
 
 export async function runOpenIntelligenceSync() {
@@ -223,7 +249,7 @@ export async function runOpenIntelligenceSync() {
     safeSync(() => syncIdentities(maxSecurities)),
     safeSync(syncCalendars),
     safeSync(syncMacro),
-    safeSync(() => form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,securities:0,inserted:0,errors:[]})),
+    safeSync(() => form4Max ? syncForm4(form4Max) : Promise.resolve({ok:true as const,status:'success' as const,securities:0,attempted:0,skipped:0,circuitOpen:false,inserted:0,errors:[]})),
   ]);
   return {ok:Boolean(universe.ok||identities.ok||calendars.ok||macro.ok||form4.ok),mode:'shadow' as const,capitalExecutionEnabled:false as const,universe,identities,calendars,macro,form4,completedAt:new Date().toISOString()};
 }

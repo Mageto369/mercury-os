@@ -30,6 +30,15 @@ export function summarizeProviderBatch(
     : { ok: false as const, reason: `all_${label}_requests_failed` };
 }
 
+export function identityProviderUrls(
+  env: Record<string, string | undefined> = process.env,
+) {
+  return {
+    mapperUrl: env.SEC_CIK_MAPPER_URL?.trim() || null,
+    financeUrl: env.FINANCE_DATABASE_URL?.trim() || null,
+  };
+}
+
 async function safeSync<T>(operation: () => Promise<T>) {
   try {
     return await operation();
@@ -92,33 +101,54 @@ async function syncUniverse() {
 
 async function syncIdentities(limit: number) {
   const sql = getSql(); if (!sql) return { ok:false as const, reason:'database_not_configured' as const };
-  const securities = await sql`SELECT s.id, s.symbol FROM securities s
-    LEFT JOIN LATERAL (SELECT max(si.observed_at) AS last_observed_at FROM security_identities si WHERE si.security_id=s.id) latest ON true
-    WHERE s.active=true ORDER BY latest.last_observed_at ASC NULLS FIRST,s.symbol LIMIT ${limit}`;
-  let inserted = 0; let enriched = 0; const errors:string[]=[];
+  const catalogRows = await sql`INSERT INTO security_identities
+      (id,security_id,cik,ticker,issuer_name,exchange,source,evidence_class,payload)
+    SELECT 'catalog:'||s.id,s.id,lpad(regexp_replace(s.cik,'\\D','','g'),10,'0'),upper(s.symbol),s.name,upper(s.market),
+      'securities-catalog','reference',jsonb_build_object('catalogSource',true,'securityId',s.id)
+    FROM securities s
+    WHERE s.active=true AND s.cik IS NOT NULL AND btrim(s.cik)<>''
+    ON CONFLICT(id) DO UPDATE SET cik=EXCLUDED.cik,ticker=EXCLUDED.ticker,issuer_name=EXCLUDED.issuer_name,
+      exchange=EXCLUDED.exchange,payload=EXCLUDED.payload,observed_at=now()
+    WHERE (security_identities.cik,security_identities.ticker,security_identities.issuer_name,security_identities.exchange,security_identities.payload)
+      IS DISTINCT FROM (EXCLUDED.cik,EXCLUDED.ticker,EXCLUDED.issuer_name,EXCLUDED.exchange,EXCLUDED.payload)
+    RETURNING id`;
+  const {mapperUrl,financeUrl}=identityProviderUrls();
+  const securities = mapperUrl || financeUrl
+    ? await sql`SELECT s.id,s.symbol FROM securities s
+        WHERE s.active=true ORDER BY s.symbol LIMIT ${limit}`
+    : [];
+  let inserted = 0; let enriched = 0; let attempted=0; let failed=0; const errors:string[]=[];
   for (const security of securities) {
     const symbol = String(security.symbol).toUpperCase();
-    const identity = await callSidecar<Identity>(baseUrl(process.env.SEC_CIK_MAPPER_URL), `/identity/${encodeURIComponent(symbol)}`);
-    if (identity.ok) {
-      const x=identity.data;
-      const q=await sql`INSERT INTO security_identities (id,security_id,cik,ticker,issuer_name,exchange,source,evidence_class,payload)
-        VALUES (${hash(['cik-map',symbol,x.cik,x.exchange])},${String(security.id)},${x.cik ?? null},${symbol},${x.issuerName ?? null},${x.exchange ?? null},${x.source},${x.evidenceClass},${JSON.stringify(x)}::jsonb)
-        ON CONFLICT(id) DO UPDATE SET cik=EXCLUDED.cik,issuer_name=EXCLUDED.issuer_name,exchange=EXCLUDED.exchange,payload=EXCLUDED.payload,observed_at=now() RETURNING id`;
-      inserted += q.length;
-    } else errors.push(`${symbol}:identity:${identity.reason}`);
+    if(mapperUrl){
+      attempted+=1;
+      const identity = await callSidecar<Identity>(mapperUrl, `/identity/${encodeURIComponent(symbol)}`);
+      if (identity.ok) {
+        const x=identity.data;
+        const q=await sql`INSERT INTO security_identities (id,security_id,cik,ticker,issuer_name,exchange,source,evidence_class,payload)
+          VALUES (${hash(['cik-map',symbol,x.cik,x.exchange])},${String(security.id)},${x.cik ?? null},${symbol},${x.issuerName ?? null},${x.exchange ?? null},${x.source},${x.evidenceClass},${toJsonb(x)}::jsonb)
+          ON CONFLICT(id) DO UPDATE SET cik=EXCLUDED.cik,issuer_name=EXCLUDED.issuer_name,exchange=EXCLUDED.exchange,payload=EXCLUDED.payload,observed_at=now() RETURNING id`;
+        inserted += q.length;
+      } else {failed+=1;errors.push(`${symbol}:identity:${identity.reason}`);}
+    }
 
-    const ref = await callSidecar<EquityRef>(baseUrl(process.env.FINANCE_DATABASE_URL), `/reference/equity/${encodeURIComponent(symbol)}`);
-    if (ref.ok && ref.data.found) {
-      for (const row of ref.data.records ?? []) {
-        const ticker=String(row.symbol ?? symbol).toUpperCase();
-        const q=await sql`INSERT INTO security_identities (id,security_id,ticker,issuer_name,exchange,cusip,isin,figi,source,evidence_class,payload)
-          VALUES (${hash(['finance-db',security.id,ticker,row.cusip,row.isin,row.figi])},${String(security.id)},${ticker},${row.name ? String(row.name) : null},${row.exchange ? String(row.exchange) : null},${row.cusip ? String(row.cusip) : null},${row.isin ? String(row.isin) : null},${row.figi ? String(row.figi) : null},'financedatabase','reference',${JSON.stringify(row)}::jsonb)
-          ON CONFLICT DO NOTHING RETURNING id`;
-        enriched += q.length;
+    if(financeUrl){
+      attempted+=1;
+      const ref = await callSidecar<EquityRef>(financeUrl, `/reference/equity/${encodeURIComponent(symbol)}`);
+      if(!ref.ok){failed+=1;errors.push(`${symbol}:reference:${ref.reason}`);}
+      else if (ref.data.found) {
+        for (const row of ref.data.records ?? []) {
+          const ticker=String(row.symbol ?? symbol).toUpperCase();
+          const q=await sql`INSERT INTO security_identities (id,security_id,ticker,issuer_name,exchange,cusip,isin,figi,source,evidence_class,payload)
+            VALUES (${hash(['finance-db',security.id,ticker,row.cusip,row.isin,row.figi])},${String(security.id)},${ticker},${row.name ? String(row.name) : null},${row.exchange ? String(row.exchange) : null},${row.cusip ? String(row.cusip) : null},${row.isin ? String(row.isin) : null},${row.figi ? String(row.figi) : null},'financedatabase','reference',${toJsonb(row)}::jsonb)
+            ON CONFLICT DO NOTHING RETURNING id`;
+          enriched += q.length;
+        }
       }
     }
   }
-  return {...summarizeProviderBatch('identity', securities.length, errors.length), securities:securities.length, identityRowsInserted:inserted, referenceRowsInserted:enriched, errors};
+  const batch=summarizeProviderBatch('identity_enrichment', attempted, failed);
+  return {...batch,status:errors.length?'degraded' as const:'success' as const,catalogRowsUpserted:catalogRows.length,securities:securities.length,identityRowsInserted:inserted,referenceRowsInserted:enriched,errors};
 }
 
 async function syncCalendars() {

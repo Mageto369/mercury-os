@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import {
+  identityProviderUrls,
   normalizeSidecarTimestamp,
   summarizeProviderBatch,
 } from "@/lib/integrations/open-intelligence-sync";
@@ -33,4 +34,18 @@ test("provider batches fail when every attempted request fails", () => {
 test("provider batches accept partial success and empty work", () => {
   expect(summarizeProviderBatch("macro", 5, 4)).toEqual({ ok: true });
   expect(summarizeProviderBatch("form4", 0, 0)).toEqual({ ok: true });
+});
+
+test("identity enrichment only uses dedicated provider URLs", () => {
+  expect(identityProviderUrls({OPEN_INTELLIGENCE_URL:"https://shared.example"})).toEqual({
+    mapperUrl:null,
+    financeUrl:null,
+  });
+  expect(identityProviderUrls({
+    SEC_CIK_MAPPER_URL:" https://mapper.example ",
+    FINANCE_DATABASE_URL:"https://finance.example",
+  })).toEqual({
+    mapperUrl:"https://mapper.example",
+    financeUrl:"https://finance.example",
+  });
 });

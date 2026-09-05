@@ -1,4 +1,4 @@
-export type MarketProviderName = 'massive' | 'intrinio';
+export type MarketProviderName = 'massive' | 'intrinio' | 'nasdaq-delayed';
 
 export interface NormalizedMarketSnapshot {
   symbol: string;
@@ -11,6 +11,7 @@ export interface NormalizedMarketSnapshot {
   rvol?: number;
   observedAt: Date;
   source: MarketProviderName;
+  isRealTime: boolean;
   providerPayload?: Record<string, unknown>;
 }
 

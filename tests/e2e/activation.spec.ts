@@ -124,15 +124,20 @@ test("market provider fabric exposes failover state and open pulling", async ({
   const statusJson = await status.json();
   expect(statusJson.mode).toBe("auto");
   expect(statusJson.capitalExecutionEnabled).toBe(false);
-  expect(statusJson.providers).toHaveLength(2);
+  expect(statusJson.providers).toHaveLength(3);
   expect(
     statusJson.providers.map((item: { name: string }) => item.name),
-  ).toEqual(["massive", "intrinio"]);
+  ).toEqual(["massive", "intrinio", "nasdaq-delayed"]);
   expect(
-    statusJson.providers.every(
-      (item: { configured: boolean }) => item.configured === false,
-    ),
+    statusJson.providers.find(
+      (item: { name: string }) => item.name === "nasdaq-delayed",
+    )?.configured,
   ).toBeTruthy();
+  expect(
+    statusJson.providers.find(
+      (item: { name: string }) => item.name === "nasdaq-delayed",
+    )?.evidenceClass,
+  ).toBe("delayed-reference");
   const response = await request.post("/api/providers/market/pull");
   expect(response.status()).toBe(503);
   const json = await response.json();

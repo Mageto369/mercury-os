@@ -54,6 +54,7 @@ function normalize(
         : observedMs,
     ),
     source: "massive",
+    isRealTime: true,
     providerPayload: {
       minuteVwap: ticker.min?.vw,
       dayVwap: ticker.day?.vw,

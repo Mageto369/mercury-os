@@ -30,13 +30,16 @@ export function SystemStateRail() {
         <span className="sys-detail">{state?.detail ?? 'Reading system health…'}</span>
         <span className="sys-facts">
           <span title="Warehouse connection">
-            DB <b>{state?.database.reachable ? 'UP' : 'DOWN'}</b>
+            DB <b>{!state ? 'CHECKING' : state.database.reachable ? 'UP' : 'DOWN'}</b>
           </span>
           <span title="Configured data providers">
             PROVIDERS <b>{state?.providers.configured ?? 0}/{state?.providers.total ?? 0}</b>
           </span>
           <span title="Live securities in the warehouse">
             UNIVERSE <b>{state?.ingestion.liveSecurities ?? 0}</b>
+          </span>
+          <span title="Securities with stored market observations">
+            QUOTED <b>{state?.ingestion.quotedSecurities ?? 0}</b>
           </span>
           <span title="Real capital is locked and cannot be enabled from the application">
             CAPITAL <b className="sys-locked">LOCKED</b>
@@ -48,7 +51,7 @@ export function SystemStateRail() {
       {open && (
         <div className="sys-rail-detail">
           {blockers.length === 0 ? (
-            <p className="sys-clear">No runtime blockers. Every configured subsystem is responding.</p>
+            <p className="sys-clear">No blockers reported by the latest health check.</p>
           ) : (
             <ul className="sys-blockers">
               {blockers.map((blocker) => (

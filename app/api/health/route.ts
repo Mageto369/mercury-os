@@ -42,7 +42,13 @@ export async function GET() {
     validationSecurities: 0,
     liveOpportunities: 0,
     matured60mOutcomes: 0,
+    marketSnapshots: 0,
+    liveMarketSnapshots: 0,
+    referenceMarketSnapshots: 0,
+    quotedSecurities: 0,
   };
+
+  let marketPipeline: {enabled: boolean; status: string; lastRunAt: string | null; error: string | null; cadenceMinutes: number; overdue: boolean} | null = null;
 
   if (sql) {
     try {
@@ -75,7 +81,7 @@ export async function GET() {
             row.enabled && row.model && (row.secret_configured || providers.kimi),
           );
       }
-      const [tables, securities, opportunities, outcomes] = await Promise.all([
+      const [tables, securities, opportunities, outcomes, snapshots, pipeline] = await Promise.all([
         sql<
           { count: number }[]
         >`select count(*)::int as count from information_schema.tables where table_schema = 'public'`,
@@ -97,7 +103,26 @@ export async function GET() {
           join securities s on s.id = oo.security_id
           where s.id not like 'validation:%' and oo.matured_60m = true
         `,
+        sql<{total: number; live: number; reference: number; securities: number}[]>`
+          select count(*)::int as total,
+            count(*) filter(where m.payload->>'livePull'='true' and m.payload->>'evidenceClass'='live' and m.payload->>'source'<>'nasdaq-delayed')::int as live,
+            count(*) filter(where m.payload->>'evidenceClass'='delayed-reference')::int as reference,
+            count(distinct m.security_id)::int as securities
+          from market_snapshots m join securities s on s.id=m.security_id
+          where s.id not like 'validation:%' and m.id not like 'validation:%'
+            and coalesce(m.payload->>'synthetic','false')<>'true'
+        `,
+        sql<{enabled: boolean; last_status: string; last_run_at: string | null; last_error: string | null; cadence_minutes: number; overdue: boolean}[]>`
+          select enabled,last_status,last_run_at::text,last_error,cadence_minutes,
+            (last_run_at is not null and last_run_at < now() - make_interval(mins => greatest(cadence_minutes * 3,5))) as overdue
+          from ingestion_settings where pipeline_key='market-snapshots' limit 1
+        `,
       ]);
+      if (pipeline[0]) marketPipeline = {
+        enabled: pipeline[0].enabled, status: pipeline[0].last_status,
+        lastRunAt: pipeline[0].last_run_at, error: pipeline[0].last_error,
+        cadenceMinutes: Number(pipeline[0].cadence_minutes), overdue: pipeline[0].overdue,
+      };
       databaseReachable = true;
       warehouse = {
         publicTables: Number(tables[0]?.count ?? 0),
@@ -105,6 +130,10 @@ export async function GET() {
         validationSecurities: Number(securities[0]?.validation ?? 0),
         liveOpportunities: Number(opportunities[0]?.count ?? 0),
         matured60mOutcomes: Number(outcomes[0]?.count ?? 0),
+        marketSnapshots: Number(snapshots[0]?.total ?? 0),
+        liveMarketSnapshots: Number(snapshots[0]?.live ?? 0),
+        referenceMarketSnapshots: Number(snapshots[0]?.reference ?? 0),
+        quotedSecurities: Number(snapshots[0]?.securities ?? 0),
       };
       schemaReady = warehouse.publicTables >= 48;
     } catch (error) {
@@ -141,6 +170,7 @@ export async function GET() {
     providers,
     runtime: runtimeReadiness,
     warehouse,
+    marketPipeline,
     requiredRuntimeReady,
     databaseError,
     checkedAt: new Date().toISOString(),

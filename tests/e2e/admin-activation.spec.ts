@@ -23,7 +23,7 @@ test("Admin shows live health and enables a newly credentialed provider", async 
       contentType: "application/json",
       body: JSON.stringify({
         configuredProviders: 3,
-        totalProviders: 17,
+        totalProviders: 18,
         requiredRuntimeReady: true,
         runtime: { databaseReachable: true, schemaReady: true },
         warehouse: { liveSecurities: 10160 },

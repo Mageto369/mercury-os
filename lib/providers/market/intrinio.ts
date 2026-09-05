@@ -86,6 +86,7 @@ export const intrinioMarketProvider: MarketProvider = {
                 ? new Date(data.last_time)
                 : new Date(),
               source: "intrinio" as const,
+              isRealTime: true,
               providerPayload: {},
             } satisfies NormalizedMarketSnapshot;
           } catch (error) {

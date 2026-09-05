@@ -2,12 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { intrinioMarketProvider } from '@/lib/providers/market/intrinio';
 import { massiveMarketProvider } from '@/lib/providers/market/massive';
+import { nasdaqDelayedMarketProvider } from '@/lib/providers/market/nasdaq-delayed';
 import type { MarketProvider, MarketProviderName, MarketProviderPullResult } from '@/lib/providers/market/types';
 import { toJsonb } from '@/lib/db/json';
 
-const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider };
-function selectedProviders(): MarketProvider[] { const configuredMode=(process.env.MARKET_DATA_PROVIDER??'auto').toLowerCase();if(configuredMode==='massive')return[providers.massive];if(configuredMode==='intrinio')return[providers.intrinio];return[providers.massive,providers.intrinio]; }
-export async function getMarketProviderStatus(){return{mode:process.env.MARKET_DATA_PROVIDER??'auto',providers:await Promise.all(Object.values(providers).map(async provider=>({name:provider.name,configured:await provider.configured()}))),preferred:selectedProviders().map(provider=>provider.name)}}
+const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider, 'nasdaq-delayed': nasdaqDelayedMarketProvider };
+function selectedProviders(): MarketProvider[] { const configuredMode=(process.env.MARKET_DATA_PROVIDER??'auto').toLowerCase();if(configuredMode==='massive')return[providers.massive];if(configuredMode==='intrinio')return[providers.intrinio];if(configuredMode==='nasdaq-delayed')return[providers['nasdaq-delayed']];return[providers.massive,providers.intrinio,providers['nasdaq-delayed']]; }
+export async function getMarketProviderStatus(){return{mode:process.env.MARKET_DATA_PROVIDER??'auto',providers:await Promise.all(Object.values(providers).map(async provider=>({name:provider.name,configured:await provider.configured(),evidenceClass:provider.name==='nasdaq-delayed'?'delayed-reference':'live'}))),preferred:selectedProviders().map(provider=>provider.name)}}
 export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  const sql=getSql();if(!sql)return{ok:false as const,reason:'database_not_configured' as const,attempts:[] as MarketProviderPullResult[]};
  const maxSymbols=Math.max(1,Math.min(5000,Number(maxSymbolsOverride??process.env.MARKET_PULL_MAX_SYMBOLS??750)));
@@ -30,7 +31,7 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
    SELECT s.id, s.symbol
    FROM securities s
    LEFT JOIN LATERAL (
-     SELECT max(ms.observed_at) AS last_snapshot_at
+     SELECT max(coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz,ms.observed_at)) AS last_snapshot_at
      FROM market_snapshots ms
      WHERE ms.security_id = s.id
    ) latest ON true
@@ -47,6 +48,6 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  }
  if(!winner)return{ok:false as const,reason:attempts.length?'all_market_providers_failed' as const:'market_provider_not_configured' as const,attempts};
  const structures=await sql`SELECT DISTINCT ON (security_id) security_id, float_shares FROM share_structures WHERE security_id = ANY(${sql.array([...securityIds.values()])}) ORDER BY security_id, observed_at DESC`;const floats=new Map(structures.map(row=>[String(row.security_id),Number(row.float_shares??0)]));let inserted=0;
- for(const snapshot of winner.snapshots){const securityId=securityIds.get(snapshot.symbol);if(!securityId)continue;const floatShares=floats.get(securityId)??0;const floatRotation=floatShares>0?snapshot.volume/floatShares:null;const payload=JSON.parse(JSON.stringify({source:snapshot.source,provider:snapshot.providerPayload??{},livePull:true})) as Record<string,string|number|boolean|null|Record<string,string|number|boolean|null>>;await sql`INSERT INTO market_snapshots (id,security_id,price,volume,dollar_volume,bid,ask,spread_bps,rvol,float_rotation,payload,observed_at) VALUES (${randomUUID()},${securityId},${snapshot.price},${Math.round(snapshot.volume)},${snapshot.dollarVolume},${snapshot.bid??null},${snapshot.ask??null},${snapshot.spreadBps??null},${snapshot.rvol??null},${floatRotation},${toJsonb(payload)}::jsonb,${snapshot.observedAt})`;inserted++}
+ for(const snapshot of winner.snapshots){const securityId=securityIds.get(snapshot.symbol);if(!securityId)continue;const floatShares=floats.get(securityId)??0;const floatRotation=floatShares>0?snapshot.volume/floatShares:null;const ingestedAt=new Date().toISOString();const payload=JSON.parse(JSON.stringify({source:snapshot.source,provider:snapshot.providerPayload??{},livePull:snapshot.isRealTime,evidenceClass:snapshot.isRealTime?'live':'delayed-reference',ingestedAt})) as Record<string,string|number|boolean|null|Record<string,string|number|boolean|null>>;const rows=await sql`INSERT INTO market_snapshots (id,security_id,price,volume,dollar_volume,bid,ask,spread_bps,rvol,float_rotation,payload,observed_at) SELECT ${randomUUID()},${securityId},${snapshot.price},${Math.round(snapshot.volume)},${snapshot.dollarVolume},${snapshot.bid??null},${snapshot.ask??null},${snapshot.spreadBps??null},${snapshot.rvol??null},${floatRotation},${toJsonb(payload)}::jsonb,${snapshot.observedAt} WHERE NOT EXISTS (SELECT 1 FROM market_snapshots existing WHERE existing.security_id=${securityId} AND existing.observed_at=${snapshot.observedAt} AND existing.payload->>'source'=${snapshot.source}) RETURNING id`;inserted+=rows.length}
  return{ok:true as const,provider:winner.provider,inserted,requested:symbols.length,received:winner.received,errors:winner.errors,attempts,mode:'shadow' as const,capitalExecutionEnabled:false as const,completedAt:new Date().toISOString()};
 }

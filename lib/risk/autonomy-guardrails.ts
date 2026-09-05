@@ -1,4 +1,4 @@
-import { getProviderReadiness } from '@/lib/autonomy/providers';
+import { getProviderReadiness, type ProviderState, type ProviderKey } from '@/lib/autonomy/providers';
 
 export interface GuardrailState {
   emergencyHalt: boolean;
@@ -10,8 +10,10 @@ export interface GuardrailState {
   reasons: string[];
 }
 
-export function evaluateAutonomyGuardrails(): GuardrailState {
-  const providers = getProviderReadiness();
+export async function evaluateAutonomyGuardrails(
+  providerState?: Record<ProviderKey, ProviderState>,
+): Promise<GuardrailState> {
+  const providers = providerState ?? (await getProviderReadiness());
   const emergencyHalt = process.env.AUTONOMY_HALT === '1' || process.env.AUTONOMY_HALT === 'true';
   const marketDataReady = providers.marketData.configured;
   const databaseReady = providers.database.configured;

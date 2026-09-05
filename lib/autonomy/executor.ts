@@ -61,8 +61,8 @@ function failedJob(job: IntelligenceJobDefinition, startedAt: Date, requiredProv
 
 export async function executeAutonomousJob(job: IntelligenceJobDefinition): Promise<AutonomousJobResult> {
   const startedAt = new Date();
-  const readiness = getProviderReadiness();
-  const guardrails = evaluateAutonomyGuardrails();
+  const readiness = await getProviderReadiness();
+  const guardrails = await evaluateAutonomyGuardrails(readiness);
   const requiredProviders = requirements[job.name];
   const configuredProviders = requiredProviders.filter((key) => readiness[key].configured);
   const missingProviders = requiredProviders.filter((key) => !readiness[key].configured);

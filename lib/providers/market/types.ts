@@ -27,6 +27,6 @@ export interface MarketProviderPullResult {
 
 export interface MarketProvider {
   name: MarketProviderName;
-  configured(): boolean;
+  configured(): Promise<boolean>;
   pull(symbols: string[]): Promise<MarketProviderPullResult>;
 }

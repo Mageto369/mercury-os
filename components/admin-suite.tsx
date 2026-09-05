@@ -81,7 +81,7 @@ export function AdminSuite() {
     (data.ingestion ?? []).map((x: SavedIngestion) => [x.pipeline_key, x]),
   );
   const configuredCount = (data.integrations ?? []).filter(
-    (x: SavedIntegration) => x.secret_configured || x.enabled,
+    (x: SavedIntegration) => x.enabled,
   ).length;
   const enabledPipelines = (data.ingestion ?? []).filter(
     (x: SavedIngestion) => x.enabled,
@@ -111,17 +111,17 @@ export function AdminSuite() {
       <section className="admin-kpis">
         <AdminKpi
           label="Database"
-          value={health?.database?.reachable ? "Live" : "Offline"}
-          tone={health?.database?.reachable ? "good" : "danger"}
+          value={health?.runtime?.databaseReachable ? "Live" : "Offline"}
+          tone={health?.runtime?.databaseReachable ? "good" : "danger"}
         />
         <AdminKpi
           label="Schema"
-          value={health?.database?.schemaReady ? "Ready" : "Waiting"}
-          tone={health?.database?.schemaReady ? "good" : "warn"}
+          value={health?.runtime?.schemaReady ? "Ready" : "Waiting"}
+          tone={health?.runtime?.schemaReady ? "good" : "warn"}
         />
         <AdminKpi label="Credential store" value="Plaintext" tone="warn" />
         <AdminKpi
-          label="Integrations"
+          label="Enabled integrations"
           value={String(configuredCount)}
           tone={configuredCount ? "good" : "warn"}
         />
@@ -299,6 +299,7 @@ function IntegrationCard({
   async function save() {
     setBusy(true);
     setMessage("");
+    const effectiveEnabled = enabled || Boolean(secret);
     const r = await fetch("/api/admin/settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -306,7 +307,7 @@ function IntegrationCard({
         type: "integration",
         value: {
           id: item.id,
-          enabled,
+          enabled: effectiveEnabled,
           baseUrl,
           model,
           secret: secret || undefined,
@@ -320,8 +321,9 @@ function IntegrationCard({
       setMessage(j.error ?? `HTTP ${r.status}`);
       return;
     }
+    setEnabled(effectiveEnabled);
     setSecret("");
-    setMessage("Saved");
+    setMessage(effectiveEnabled ? "Saved and enabled" : "Saved");
     await onSaved();
   }
   return (
@@ -383,11 +385,11 @@ function IntegrationCard({
         </span>
         <button className="pulse-button" onClick={save} disabled={busy}>
           <Save size={14} />
-          {busy ? "Saving…" : "Save changes"}
+          {busy ? "Saving…" : secret && !enabled ? "Save and enable" : "Save changes"}
         </button>
       </div>
       {message && (
-        <div className={message === "Saved" ? "good" : "danger"}>{message}</div>
+        <div className={message.startsWith("Saved") ? "good" : "danger"}>{message}</div>
       )}
     </article>
   );

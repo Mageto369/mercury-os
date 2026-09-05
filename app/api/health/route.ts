@@ -45,10 +45,14 @@ export async function GET() {
 
   if (sql) {
     try {
-      const llmRows = await sql<
+      const integrationRows = await sql<
         { id: string; enabled: boolean; model: string | null; secret_configured: boolean }[]
-      >`select c.id,c.enabled,c.model,exists(select 1 from integration_secrets s where s.integration_id=c.id and s.secret_name='api_key') as secret_configured from integration_configs c where c.id in ('openai','anthropic','gemini','deepseek','kimi')`;
-      for (const row of llmRows) {
+      >`select c.id,c.enabled,c.model,exists(select 1 from integration_secrets s where s.integration_id=c.id and s.secret_name='api_key') as secret_configured from integration_configs c where c.id in ('massive','intrinio','openai','anthropic','gemini','deepseek','kimi')`;
+      for (const row of integrationRows) {
+        if (row.id === "massive")
+          providers.massive = Boolean(row.enabled && (row.secret_configured || providers.massive));
+        if (row.id === "intrinio")
+          providers.intrinio = Boolean(row.enabled && (row.secret_configured || providers.intrinio));
         if (row.id === "openai")
           providers.openai = Boolean(
             row.enabled && row.model && (row.secret_configured || providers.openai),

@@ -13,7 +13,7 @@ export interface KillSwitchState {
 
 export async function getKillSwitchNetwork() {
   const [dataQuality, fleet] = await Promise.all([runDataQualityAgent(), getLatestAgentHeartbeats()]);
-  const governance = runGovernanceAgent();
+  const governance = await runGovernanceAgent();
   const staleMinutes = Math.max(2, Number(process.env.AGENT_STALE_MINUTES ?? 35));
   const failureThreshold = Math.max(1, Number(process.env.AGENT_FAILURE_KILL_THRESHOLD ?? 3));
   const maxShadowDrawdownPct = Math.max(1, Number(process.env.MAX_SHADOW_DRAWDOWN_PCT ?? 12));

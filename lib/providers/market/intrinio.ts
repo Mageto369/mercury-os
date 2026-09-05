@@ -1,4 +1,5 @@
 import { resolveIntegrationSecret } from "@/lib/admin/vault";
+import { isRuntimeIntegrationConfigured } from "@/lib/admin/integration-runtime";
 import type {
   MarketProvider,
   MarketProviderPullResult,
@@ -22,7 +23,8 @@ function spreadBps(bid?: number, ask?: number) {
 
 export const intrinioMarketProvider: MarketProvider = {
   name: "intrinio",
-  configured: () => Boolean(process.env.INTRINIO_API_KEY),
+  configured: () =>
+    isRuntimeIntegrationConfigured("intrinio", ["INTRINIO_API_KEY"]),
   async pull(symbols): Promise<MarketProviderPullResult> {
     const startedAt = new Date();
     const key = await resolveIntegrationSecret("intrinio", [

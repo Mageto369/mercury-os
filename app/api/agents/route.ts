@@ -8,11 +8,11 @@ import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const providers = getProviderReadiness();
-  const guardrails = evaluateAutonomyGuardrails();
+  const providers = await getProviderReadiness();
+  const guardrails = await evaluateAutonomyGuardrails(providers);
   const [dataQuality, governance] = await Promise.all([
     runDataQualityAgent(),
-    Promise.resolve(runGovernanceAgent()),
+    runGovernanceAgent(guardrails),
   ]);
 
   return NextResponse.json({

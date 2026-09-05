@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { intrinioMarketProvider } from '@/lib/providers/market/intrinio';
 import { massiveMarketProvider } from '@/lib/providers/market/massive';
 import { nasdaqDelayedMarketProvider } from '@/lib/providers/market/nasdaq-delayed';
 import type { MarketProvider, MarketProviderName, MarketProviderPullResult } from '@/lib/providers/market/types';
 import { toJsonbBase64 } from '@/lib/db/json';
+import { persistMarketSnapshots } from '@/lib/providers/market/persist';
 
 const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider, 'nasdaq-delayed': nasdaqDelayedMarketProvider };
 function selectedProviders(): MarketProvider[] { const configuredMode=(process.env.MARKET_DATA_PROVIDER??'auto').toLowerCase();if(configuredMode==='massive')return[providers.massive];if(configuredMode==='intrinio')return[providers.intrinio];if(configuredMode==='nasdaq-delayed')return[providers['nasdaq-delayed']];return[providers.massive,providers.intrinio,providers['nasdaq-delayed']]; }
@@ -61,11 +61,20 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  for(const provider of selectedProviders()){
    const configured=await provider.configured();
    if(!configured){await recordHealth(provider,false);continue;}
-   const result=await provider.pull(symbols);attempts.push(result);await recordHealth(provider,true,result);await recordAttempts(provider,result);
+   const result=await provider.pull(symbols);attempts.push(result);await recordAttempts(provider,result);
    if(result.ok&&result.snapshots.length){winner=result;break}
+   await recordHealth(provider,true,result);
  }
  if(!winner)return{ok:false as const,reason:attempts.length?'all_market_providers_failed' as const:'market_provider_not_configured' as const,attempts};
- const structures=await sql`SELECT DISTINCT ON (security_id) security_id, float_shares FROM share_structures WHERE security_id = ANY(${sql.array([...securityIds.values()])}) ORDER BY security_id, observed_at DESC`;const floats=new Map(structures.map(row=>[String(row.security_id),Number(row.float_shares??0)]));let inserted=0;
- for(const snapshot of winner.snapshots){const securityId=securityIds.get(snapshot.symbol);if(!securityId)continue;const floatShares=floats.get(securityId)??0;const floatRotation=floatShares>0?snapshot.volume/floatShares:null;const ingestedAt=new Date().toISOString();const payload=JSON.parse(JSON.stringify({source:snapshot.source,provider:snapshot.providerPayload??{},livePull:snapshot.isRealTime,evidenceClass:snapshot.isRealTime?'live':'delayed-reference',ingestedAt})) as Record<string,string|number|boolean|null|Record<string,string|number|boolean|null>>;const rows=await sql`INSERT INTO market_snapshots (id,security_id,price,volume,dollar_volume,bid,ask,spread_bps,rvol,float_rotation,payload,observed_at) SELECT ${randomUUID()},${securityId},${snapshot.price},${Math.round(snapshot.volume)},${snapshot.dollarVolume},${snapshot.bid??null},${snapshot.ask??null},${snapshot.spreadBps??null},${snapshot.rvol??null},${floatRotation},convert_from(decode(${toJsonbBase64(payload)},'base64'),'utf8')::jsonb,${snapshot.observedAt} WHERE NOT EXISTS (SELECT 1 FROM market_snapshots existing WHERE existing.security_id=${securityId} AND existing.observed_at=${snapshot.observedAt} AND existing.payload->>'source'=${snapshot.source}) RETURNING id`;inserted+=rows.length}
+ const structures=await sql`SELECT DISTINCT ON (security_id) security_id, float_shares FROM share_structures WHERE security_id = ANY(${sql.array([...securityIds.values()])}) ORDER BY security_id, observed_at DESC`;
+ const floats=new Map(structures.map(row=>[String(row.security_id),Number(row.float_shares??0)]));
+ let inserted=0;
+ try {
+   inserted=await persistMarketSnapshots(sql,winner.snapshots,securityIds,floats);
+ } catch(error) {
+   await recordHealth(providers[winner.provider],true,{...winner,ok:false,errors:[...winner.errors,{message:`persistence_failed: ${error instanceof Error?error.message:'unknown'}`}]});
+   throw error;
+ }
+ await recordHealth(providers[winner.provider],true,winner);
  return{ok:true as const,provider:winner.provider,inserted,requested:symbols.length,received:winner.received,errors:winner.errors,attempts,mode:'shadow' as const,capitalExecutionEnabled:false as const,completedAt:new Date().toISOString()};
 }

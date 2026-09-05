@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.use({timezoneId: 'America/Chicago'});
+
 test("Market separates delayed quotes from live opportunity scoring", async ({
   page,
 }) => {
@@ -42,6 +44,7 @@ test("Market separates delayed quotes from live opportunity scoring", async ({
   await expect(referenceSection.getByText("AAPL", { exact: true })).toBeVisible();
   await expect(referenceSection.getByText("$319.9700")).toBeVisible();
   await expect(referenceSection.getByText("nasdaq-delayed")).toBeVisible();
+  await expect(referenceSection.getByText('2026-09-04', {exact: true})).toBeVisible();
   await expect(
     referenceSection.getByText(
       "These rows do not enter live opportunity scoring.",

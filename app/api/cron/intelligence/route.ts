@@ -120,6 +120,11 @@ async function runIntelligenceCycle(force = false) {
         ? "not_due"
         : "disabled_by_ingestion_policy",
     };
+  // Commit this pipeline's status before unrelated provider work. Otherwise
+  // a timeout later in the cycle hides a successful market write and its cadence.
+  const marketSummary = summarizePipeline([{name: "market-provider", result: marketRefresh}]);
+  await record(marketPolicy, marketSummary);
+
   if (openDataDue) {
     try {
       openDataRefresh = await runOpenDataMesh();
@@ -171,9 +176,7 @@ async function runIntelligenceCycle(force = false) {
       message: "workflow_not_requested",
     };
   const pipelineResults = {
-    "market-snapshots": summarizePipeline([
-      { name: "market-provider", result: marketRefresh },
-    ]),
+    "market-snapshots": marketSummary,
     "sec-filings": summarizePipeline([
       { name: "company-facts", result: nestedResult(openDataRefresh, "sec") },
       { name: "recent-filings", result: assignment("sec-filings") },
@@ -207,7 +210,7 @@ async function runIntelligenceCycle(force = false) {
     ]),
   } satisfies Record<string, PipelineSummary>;
   await Promise.all(
-    Object.entries(pipelineResults).map(([key, summary]) =>
+    Object.entries(pipelineResults).filter(([key]) => key !== "market-snapshots").map(([key, summary]) =>
       record(ingestion[key], summary),
     ),
   );

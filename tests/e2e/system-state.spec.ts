@@ -16,17 +16,61 @@ const health = (overrides: Partial<HealthPayload> = {}): HealthPayload => ({
     databaseConfigured: true,
     databaseReachable: true,
     schemaReady: true,
+    marketProviderConfigured: true,
     ...overrides.runtime,
   },
   warehouse: {
     liveSecurities: 120,
     liveOpportunities: 40,
     matured60mOutcomes: 25,
+    marketSnapshots: 250,
+    liveMarketSnapshots: 250,
+    referenceMarketSnapshots: 0,
+    quotedSecurities: 120,
     ...overrides.warehouse,
   },
+  marketPipeline: overrides.marketPipeline === undefined ? {enabled: true, status: 'success', lastRunAt: '2026-09-05T06:00:00Z', error: null, overdue: false} : overrides.marketPipeline,
 });
 
 test.describe("posture", () => {
+  test('a seeded universe with no quote evidence is awaiting data', () => {
+    const state = deriveSystemState(health({warehouse:{marketSnapshots:0, liveMarketSnapshots:0, quotedSecurities:0}}));
+    expect(state.posture).toBe('awaiting-data');
+    expect(state.ingestion.hasMarketData).toBe(false);
+    expect(state.blockers.map(b=>b.key)).toContain('no_quotes');
+  });
+
+  test('working reference ingestion never claims live-market operation', () => {
+    const state = deriveSystemState(health({runtime:{marketProviderConfigured:false},warehouse:{marketSnapshots:129,liveMarketSnapshots:0,referenceMarketSnapshots:129,quotedSecurities:129}}));
+    expect(state.label).toBe('REFERENCE DATA');
+    expect(state.detail).toContain('129 delayed reference quotes');
+    expect(state.blockers.map(b=>b.key)).toContain('live_market_provider');
+  });
+
+  test('a failed pipeline overrides configured providers and existing quotes', () => {
+    const state = deriveSystemState(health({marketPipeline:{enabled:true,status:'degraded',lastRunAt:'2026-09-05T06:00:00Z',error:'persistence_failed'}}));
+    expect(state.posture).toBe('degraded');
+    expect(state.blockers.find(b=>b.key==='market_failed')?.remedy).toBe('persistence_failed');
+  });
+
+  test('old success is not current operating evidence', () => {
+    const state = deriveSystemState(health({marketPipeline:{enabled:true,status:'success',lastRunAt:'2026-09-01T00:00:00Z',error:null,overdue:true}}));
+    expect(state.posture).toBe('degraded');
+    expect(state.blockers.map(b=>b.key)).toContain('market_overdue');
+  });
+
+  test('missing ingestion history never qualifies as operational', () => {
+    const state = deriveSystemState(health({marketPipeline:null}));
+    expect(state.posture).toBe('degraded');
+    expect(state.blockers.map(b=>b.key)).toContain('market_never_run');
+  });
+
+  test('disabled ingestion is actionable even with a previous success', () => {
+    const state = deriveSystemState(health({marketPipeline:{enabled:false,status:'success',lastRunAt:'2026-09-05T06:00:00Z',error:null}}));
+    expect(state.blockers.map(b=>b.key)).toContain('market_disabled');
+    expect(state.posture).toBe('degraded');
+  });
+
   test("a fully configured, ingesting system is operational", () => {
     const state = deriveSystemState(health());
     expect(state.posture).toBe("operational");

@@ -25,25 +25,43 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
        last_success_at=COALESCE(EXCLUDED.last_success_at,provider_health.last_success_at),last_failure_at=COALESCE(EXCLUDED.last_failure_at,provider_health.last_failure_at),
        latency_ms=EXCLUDED.latency_ms,records_received=EXCLUDED.records_received,last_error=EXCLUDED.last_error,metadata=EXCLUDED.metadata,updated_at=now()`;
  };
+ const recordAttempts=async(provider:MarketProvider,result:MarketProviderPullResult)=>{
+   const snapshots=new Set(result.snapshots.map(snapshot=>snapshot.symbol));
+   const errorBySymbol=new Map(result.errors.filter(item=>item.symbol).map(item=>[String(item.symbol),item.message]));
+   const attempted=new Set([...snapshots,...errorBySymbol.keys()]);
+   const rows=[...attempted].flatMap(symbol=>{const securityId=securityIds.get(symbol);return securityId?[{security_id:securityId,provider:provider.name,last_status:snapshots.has(symbol)?'success':'failed',last_error:errorBySymbol.get(symbol)??null}]:[]});
+   if(!rows.length)return;
+   await sql`INSERT INTO market_pull_attempts(security_id,provider,last_attempt_at,last_status,last_error)
+     SELECT security_id,provider,now(),last_status,last_error
+     FROM jsonb_to_recordset(convert_from(decode(${toJsonbBase64(rows)},'base64'),'utf8')::jsonb)
+       AS input(security_id text,provider text,last_status text,last_error text)
+     ON CONFLICT(security_id,provider) DO UPDATE SET last_attempt_at=now(),last_status=EXCLUDED.last_status,last_error=EXCLUDED.last_error`;
+ };
  // Refresh unseen and stalest symbols first. Alphabetical-only selection leaves
  // every symbol after the first batch permanently untouched.
  const universe=await sql`
+   WITH latest AS (
+     SELECT ms.security_id,max(coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz,ms.observed_at)) AS last_snapshot_at
+     FROM market_snapshots ms
+     GROUP BY ms.security_id
+   ), attempted AS (
+     SELECT mpa.security_id,max(mpa.last_attempt_at) AS last_attempt_at
+     FROM market_pull_attempts mpa
+     GROUP BY mpa.security_id
+   )
    SELECT s.id, s.symbol
    FROM securities s
-   LEFT JOIN LATERAL (
-     SELECT max(coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz,ms.observed_at)) AS last_snapshot_at
-     FROM market_snapshots ms
-     WHERE ms.security_id = s.id
-   ) latest ON true
+   LEFT JOIN latest ON latest.security_id=s.id
+   LEFT JOIN attempted ON attempted.security_id=s.id
    WHERE s.active = true AND s.id NOT LIKE 'validation:%'
-   ORDER BY latest.last_snapshot_at ASC NULLS FIRST, s.symbol
+   ORDER BY greatest(latest.last_snapshot_at,attempted.last_attempt_at) ASC NULLS FIRST, s.symbol
    LIMIT ${maxSymbols}`;
  const symbols=universe.map(row=>String(row.symbol));if(!symbols.length)return{ok:false as const,reason:'universe_empty' as const,attempts:[] as MarketProviderPullResult[]};
  const securityIds=new Map(universe.map(row=>[String(row.symbol),String(row.id)]));const attempts:MarketProviderPullResult[]=[];let winner:MarketProviderPullResult|null=null;
  for(const provider of selectedProviders()){
    const configured=await provider.configured();
    if(!configured){await recordHealth(provider,false);continue;}
-   const result=await provider.pull(symbols);attempts.push(result);await recordHealth(provider,true,result);
+   const result=await provider.pull(symbols);attempts.push(result);await recordHealth(provider,true,result);await recordAttempts(provider,result);
    if(result.ok&&result.snapshots.length){winner=result;break}
  }
  if(!winner)return{ok:false as const,reason:attempts.length?'all_market_providers_failed' as const:'market_provider_not_configured' as const,attempts};

@@ -1,6 +1,14 @@
 import { expect, test } from "@playwright/test";
 import { normalizeNasdaqDelayedSnapshot } from "@/lib/providers/market/nasdaq-delayed";
 
+test('a Nasdaq provider flag alone never promotes a reference quote to live evidence', () => {
+  const snapshot = normalizeNasdaqDelayedSnapshot('AAPL', {data: {symbol: 'AAPL', primaryData: {
+    lastSalePrice: '$319.97', lastTradeTimestamp: 'Sep 4, 2026', volume: '100', isRealTime: true,
+  }}});
+  expect(snapshot?.isRealTime).toBe(false);
+  expect(snapshot?.providerPayload).toMatchObject({isRealTime: true, evidenceClass: 'delayed-reference'});
+});
+
 test("Nasdaq reference quotes preserve delayed evidence boundaries", () => {
   const snapshot = normalizeNasdaqDelayedSnapshot("aapl", {
     data: {

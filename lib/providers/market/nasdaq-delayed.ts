@@ -54,11 +54,11 @@ export function normalizeNasdaqDelayedSnapshot(
     dollarVolume: price * volume,
     observedAt,
     source: "nasdaq-delayed",
-    isRealTime: quote?.isRealTime === true,
+    isRealTime: false,
     providerPayload: {
       marketStatus: body.data?.marketStatus ?? null,
       isRealTime: quote?.isRealTime === true,
-      evidenceClass: quote?.isRealTime === true ? "live" : "delayed-reference",
+      evidenceClass: "delayed-reference",
     },
   };
 }

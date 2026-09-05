@@ -1,5 +1,5 @@
 import { agentRegistry } from '@/lib/agents/registry';
-import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
+import { evaluateAutonomyGuardrails, type GuardrailState } from '@/lib/risk/autonomy-guardrails';
 
 export interface GovernanceResult {
   status: 'healthy' | 'degraded';
@@ -8,8 +8,10 @@ export interface GovernanceResult {
   guardrailReasons: string[];
 }
 
-export function runGovernanceAgent(): GovernanceResult {
-  const guardrails = evaluateAutonomyGuardrails();
+export async function runGovernanceAgent(
+  guardrailState?: GuardrailState,
+): Promise<GovernanceResult> {
+  const guardrails = guardrailState ?? (await evaluateAutonomyGuardrails());
   const authorityViolations: string[] = [];
 
   for (const agent of agentRegistry) {

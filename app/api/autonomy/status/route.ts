@@ -6,8 +6,8 @@ import { intelligenceJobs } from '@/lib/workflows/jobs';
 export const runtime = 'nodejs';
 
 export async function GET() {
-  const providers = getProviderReadiness();
-  const guardrails = evaluateAutonomyGuardrails();
+  const providers = await getProviderReadiness();
+  const guardrails = await evaluateAutonomyGuardrails(providers);
   const configured = Object.values(providers).filter((provider) => provider.configured).length;
 
   return NextResponse.json({

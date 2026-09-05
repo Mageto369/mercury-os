@@ -8,6 +8,6 @@ export async function GET() {
     ok: true,
     systemMode: 'shadow',
     capitalExecutionEnabled: false,
-    ...getMarketProviderStatus(),
+    ...(await getMarketProviderStatus()),
   });
 }

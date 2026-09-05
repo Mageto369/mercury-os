@@ -3,6 +3,7 @@ import { runGovernanceAgent } from '@/lib/agents/governance';
 import { getLatestAgentHeartbeats } from '@/lib/agents/heartbeat';
 import { agentRegistry } from '@/lib/agents/registry';
 import { getProviderReadiness } from '@/lib/autonomy/providers';
+import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
 
 export interface ReadinessGate {
   key: string;
@@ -14,9 +15,9 @@ export interface ReadinessGate {
 }
 
 export async function getProductionReadiness() {
-  const providers = getProviderReadiness();
+  const providers = await getProviderReadiness();
   const dataQuality = await runDataQualityAgent();
-  const governance = runGovernanceAgent();
+  const governance = await runGovernanceAgent(await evaluateAutonomyGuardrails(providers));
   const fleet = await getLatestAgentHeartbeats();
   const heartbeatMaxAgeMinutes = Math.max(2, Number(process.env.AGENT_STALE_MINUTES ?? 15));
   const now = Date.now();

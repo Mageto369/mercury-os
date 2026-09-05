@@ -1,4 +1,5 @@
 import { resolveIntegrationSecret } from "@/lib/admin/vault";
+import { isRuntimeIntegrationConfigured } from "@/lib/admin/integration-runtime";
 import type {
   MarketProvider,
   MarketProviderPullResult,
@@ -65,7 +66,10 @@ function normalize(
 export const massiveMarketProvider: MarketProvider = {
   name: "massive",
   configured: () =>
-    Boolean(process.env.MASSIVE_API_KEY ?? process.env.MARKET_DATA_API_KEY),
+    isRuntimeIntegrationConfigured("massive", [
+      "MASSIVE_API_KEY",
+      "MARKET_DATA_API_KEY",
+    ]),
   async pull(symbols): Promise<MarketProviderPullResult> {
     const startedAt = new Date();
     const key = await resolveIntegrationSecret("massive", [

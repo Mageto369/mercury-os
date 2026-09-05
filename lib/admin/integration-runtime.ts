@@ -39,3 +39,16 @@ export async function resolveIntegrationToken(id: string, envNames: string[], se
   if (config && !config.enabled) return null;
   return resolveIntegrationSecret(id, envNames, secretName);
 }
+
+export async function isRuntimeIntegrationConfigured(
+  id: string,
+  envNames: string[],
+  options: { requireModel?: boolean; secretName?: string } = {},
+) {
+  if (envNames.some((name) => Boolean(process.env[name]))) return true;
+  const config = await getRuntimeIntegration(id);
+  if (!config?.enabled || (options.requireModel && !config.model)) return false;
+  return Boolean(
+    await resolveIntegrationSecret(id, [], options.secretName ?? "api_key"),
+  );
+}

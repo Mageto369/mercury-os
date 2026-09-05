@@ -7,7 +7,7 @@ import { toJsonb } from '@/lib/db/json';
 
 const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider };
 function selectedProviders(): MarketProvider[] { const configuredMode=(process.env.MARKET_DATA_PROVIDER??'auto').toLowerCase();if(configuredMode==='massive')return[providers.massive];if(configuredMode==='intrinio')return[providers.intrinio];return[providers.massive,providers.intrinio]; }
-export function getMarketProviderStatus(){return{mode:process.env.MARKET_DATA_PROVIDER??'auto',providers:Object.values(providers).map(provider=>({name:provider.name,configured:provider.configured()})),preferred:selectedProviders().map(provider=>provider.name)}}
+export async function getMarketProviderStatus(){return{mode:process.env.MARKET_DATA_PROVIDER??'auto',providers:await Promise.all(Object.values(providers).map(async provider=>({name:provider.name,configured:await provider.configured()}))),preferred:selectedProviders().map(provider=>provider.name)}}
 export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  const sql=getSql();if(!sql)return{ok:false as const,reason:'database_not_configured' as const,attempts:[] as MarketProviderPullResult[]};
  const maxSymbols=Math.max(1,Math.min(5000,Number(maxSymbolsOverride??process.env.MARKET_PULL_MAX_SYMBOLS??750)));
@@ -40,7 +40,7 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  const symbols=universe.map(row=>String(row.symbol));if(!symbols.length)return{ok:false as const,reason:'universe_empty' as const,attempts:[] as MarketProviderPullResult[]};
  const securityIds=new Map(universe.map(row=>[String(row.symbol),String(row.id)]));const attempts:MarketProviderPullResult[]=[];let winner:MarketProviderPullResult|null=null;
  for(const provider of selectedProviders()){
-   const configured=provider.configured();
+   const configured=await provider.configured();
    if(!configured){await recordHealth(provider,false);continue;}
    const result=await provider.pull(symbols);attempts.push(result);await recordHealth(provider,true,result);
    if(result.ok&&result.snapshots.length){winner=result;break}

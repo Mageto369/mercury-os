@@ -165,7 +165,7 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
         const eventId = () => `paper-event:${randomUUID()}`;
 
         const snapshots = await tx`
-          select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,source,payload
+          select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,payload
           from market_snapshots
           where security_id=${order.security_id} and observed_at > ${order.created_at}
           order by observed_at desc limit 50

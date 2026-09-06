@@ -12,6 +12,7 @@ import {
   ensurePaperAccount,
 } from "@/lib/paper/account";
 import { reservedCashFor, toLedgerAmount } from "@/lib/paper/order-engine";
+import { selectPaperQuote, type PaperQuoteSnapshot } from "@/lib/paper/quote-policy";
 import { toJsonb } from "@/lib/db/json";
 
 export const runtime = "nodejs";
@@ -30,6 +31,7 @@ const OrderSchema = z
     orderType: z.enum(["market", "limit"]).default("market"),
     limitPrice: z.number().positive().optional(),
     timeInForce: z.enum(["day", "gtc"]).default("day"),
+    pricingMode: z.enum(["auto", "live", "reference"]).default("auto"),
     thesis: z.string().max(4000).optional(),
     catalyst: z.string().max(2000).optional(),
     riskNotes: z.string().max(2000).optional(),
@@ -115,12 +117,14 @@ export async function POST(request: Request) {
 
       const [opportunity] =
         await tx`select id,state,observed_at from opportunities where security_id=${security.id} order by observed_at desc limit 1`;
-      const [snapshot] =
-        await tx`select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at from market_snapshots where security_id=${security.id} order by observed_at desc limit 1`;
+      const snapshots =
+        await tx`select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,source,payload from market_snapshots where security_id=${security.id} order by observed_at desc limit 50`;
+      const quote = selectPaperQuote(snapshots as unknown as PaperQuoteSnapshot[], input.pricingMode);
+      const snapshot = quote.snapshot as (Record<string, unknown> | null);
       if (!snapshot)
         return {
           status: 409,
-          body: { ok: false, error: "market_snapshot_required" },
+          body: { ok: false, error: quote.decision.reason ?? "market_snapshot_required", quote: quote.decision, capitalExecutionEnabled: false },
         };
 
       const mark = Number(snapshot.price);
@@ -133,7 +137,7 @@ export async function POST(request: Request) {
       const requestedPrice =
         input.orderType === "limit" ? Number(input.limitPrice) : referencePrice;
       const notional = input.quantity * referencePrice;
-      const simulation = simulateExecution({
+      const executionEstimate = simulateExecution({
         notional,
         price: referencePrice,
         dollarVolume: Number(snapshot.dollar_volume ?? 0),
@@ -141,6 +145,7 @@ export async function POST(request: Request) {
         rvol: Number(snapshot.rvol ?? 1),
         floatRotation: Number(snapshot.float_rotation ?? 0),
       });
+      const simulation = { ...executionEstimate, quote: quote.decision, requestedPricingMode: input.pricingMode, pricingMode: quote.decision.pricingMode };
       const slip = simulation.estimatedOneWayCostBps / 10_000;
       const slippedPrice =
         input.side === "buy"

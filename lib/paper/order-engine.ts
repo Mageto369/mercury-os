@@ -4,6 +4,7 @@ import { getSql } from '@/lib/db';
 import { clampSimulatedFillPrice, simulateExecution } from '@/lib/execution/simulator';
 import { DEFAULT_PAPER_ACCOUNT_ID } from '@/lib/paper/account';
 import { toJsonb } from '@/lib/db/json';
+import { selectPaperQuote, type PaperPricingMode, type PaperQuoteSnapshot } from '@/lib/paper/quote-policy';
 
 /**
  * The resting-order engine.
@@ -142,7 +143,7 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
 
       const orders = await tx`
         select po.id, po.security_id, po.side, po.requested_qty, po.filled_qty, po.requested_price,
-               po.order_type, po.time_in_force, po.created_at, s.symbol, s.market
+               po.order_type, po.time_in_force, po.created_at, po.simulation, s.symbol, s.market
         from paper_orders po
         join securities s on s.id = po.security_id
         where po.status in ('open','pending','partially_filled')
@@ -163,12 +164,16 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
         const limitPrice = order.requested_price == null ? null : Number(order.requested_price);
         const eventId = () => `paper-event:${randomUUID()}`;
 
-        const [snapshot] = await tx`
-          select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at
+        const snapshots = await tx`
+          select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,source,payload
           from market_snapshots
           where security_id=${order.security_id} and observed_at > ${order.created_at}
-          order by observed_at desc limit 1
+          order by observed_at desc limit 50
         `;
+        const storedSimulation = order.simulation && typeof order.simulation === 'object' ? order.simulation as Record<string, unknown> : {};
+        const pricingMode = (['auto','live','reference'].includes(String(storedSimulation.requestedPricingMode)) ? storedSimulation.requestedPricingMode : 'auto') as PaperPricingMode;
+        const quote = selectPaperQuote(snapshots as unknown as PaperQuoteSnapshot[], pricingMode, now);
+        const snapshot = quote.snapshot as Record<string, unknown> | null;
 
         const expire = async (reason: string) => {
           await tx`update paper_orders set status='cancelled',cancelled_at=now(),updated_at=now() where id=${orderId}`;
@@ -179,7 +184,7 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
 
         if (!snapshot) {
           if (String(order.time_in_force) === 'day' && dayOrderExpired(order.created_at as Date, now)) await expire('day_order_session_ended');
-          else outcomes.push({ orderId, symbol, side, action: 'resting', reason: 'no_market_data_since_submission', fillPrice: null, referencePrice: null });
+          else outcomes.push({ orderId, symbol, side, action: 'resting', reason: quote.decision.reason ?? 'no_market_data_since_submission', fillPrice: null, referencePrice: null });
           continue;
         }
 
@@ -232,11 +237,11 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
         await tx`
           update paper_orders set status='filled', filled_qty=requested_qty, average_fill_price=${fillPrice},
             fee_amount=${feeAmount}, slippage_bps=${simulation.estimatedOneWayCostBps},
-            simulation=${toJsonb({ ...simulation, referencePrice, fillPrice, commissionBps, settledBy: 'resting-order-engine', capitalExecutionEnabled: false, brokerConnected: false })}::jsonb,
+            simulation=${toJsonb({ ...simulation, quote: quote.decision, requestedPricingMode: pricingMode, pricingMode: quote.decision.pricingMode, referencePrice, fillPrice, commissionBps, settledBy: 'resting-order-engine', capitalExecutionEnabled: false, brokerConnected: false })}::jsonb,
             updated_at=now()
           where id=${orderId}
         `;
-        await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'filled','filled',${toJsonb({ referencePrice, fillPrice, feeAmount, slippageBps: simulation.estimatedOneWayCostBps, settledBy: 'resting-order-engine', snapshotAt: snapshot.observed_at })}::jsonb)`;
+        await tx`insert into paper_order_events(id,order_id,event_type,status,detail) values(${eventId()},${orderId},'filled','filled',${toJsonb({ referencePrice, fillPrice, feeAmount, slippageBps: simulation.estimatedOneWayCostBps, settledBy: 'resting-order-engine', snapshotAt: snapshot.observed_at, quote: quote.decision })}::jsonb)`;
         await tx`update paper_trade_journal set outcome=outcome || ${toJsonb({ status: 'filled', fillPrice, feeAmount, slippageBps: simulation.estimatedOneWayCostBps, settledBy: 'resting-order-engine' })}::jsonb,updated_at=now() where order_id=${orderId}`;
         outcomes.push({ orderId, symbol, side, action: 'filled', reason: null, fillPrice, referencePrice });
         filledCount += 1;

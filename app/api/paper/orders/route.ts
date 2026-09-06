@@ -118,7 +118,7 @@ export async function POST(request: Request) {
       const [opportunity] =
         await tx`select id,state,observed_at from opportunities where security_id=${security.id} order by observed_at desc limit 1`;
       const snapshots =
-        await tx`select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,source,payload from market_snapshots where security_id=${security.id} order by observed_at desc limit 50`;
+        await tx`select price,bid,ask,spread_bps,dollar_volume,rvol,float_rotation,observed_at,payload from market_snapshots where security_id=${security.id} order by observed_at desc limit 50`;
       const quote = selectPaperQuote(snapshots as unknown as PaperQuoteSnapshot[], input.pricingMode);
       const snapshot = quote.snapshot as (Record<string, unknown> | null);
       if (!snapshot)

@@ -34,26 +34,17 @@ async function burst(request: APIRequestContext, url: string, count: number) {
 }
 
 test.describe("extreme controlled stress", () => {
-  test("all primary workspaces survive repeated parallel navigation", async ({
-    browser,
-  }) => {
+  test("all primary workspaces survive repeated parallel navigation", async ({ browser }) => {
     test.setTimeout(120_000);
     for (const [path, marker] of pages) {
-      const contexts = await Promise.all(
-        Array.from({ length: 6 }, () => browser.newContext()),
-      );
-      const results = await Promise.all(
-        contexts.map(async (context) => {
-          const page = await context.newPage();
-          const response = await page.goto(path, {
-            waitUntil: "domcontentloaded",
-            timeout: 30_000,
-          });
-          const body = await page.locator("body").innerText();
-          await context.close();
-          return { status: response?.status() ?? 0, body };
-        }),
-      );
+      const contexts = await Promise.all(Array.from({ length: 6 }, () => browser.newContext()));
+      const results = await Promise.all(contexts.map(async (context) => {
+        const page = await context.newPage();
+        const response = await page.goto(path, { waitUntil: "domcontentloaded", timeout: 30_000 });
+        const body = await page.locator("body").innerText();
+        await context.close();
+        return { status: response?.status() ?? 0, body };
+      }));
       for (const result of results) {
         expect(result.status, `${path} should render`).toBeLessThan(500);
         expect(result.body.toLowerCase()).toContain(marker.toLowerCase());
@@ -61,59 +52,27 @@ test.describe("extreme controlled stress", () => {
     }
   });
 
-  test("read APIs tolerate sustained concurrent bursts without server crashes", async ({
-    request,
-  }) => {
+  test("read APIs tolerate sustained concurrent bursts without server crashes", async ({ request }) => {
     test.setTimeout(120_000);
     for (const url of readApis) {
       const { responses, elapsedMs } = await burst(request, url, 40);
       for (const response of responses) {
-        expect(
-          response.status(),
-          `${url} returned ${response.status()}`,
-        ).toBeLessThan(600);
+        expect(response.status(), `${url} returned ${response.status()}`).toBeLessThan(600);
         expect([200, 400, 404, 409, 429, 503]).toContain(response.status());
       }
       expect(elapsedMs, `${url} burst exceeded 45s`).toBeLessThan(45_000);
     }
   });
 
-  test("open mutation surfaces reject malformed bursts without crashing", async ({
-    request,
-  }) => {
+  test("open mutation surfaces reject malformed bursts without crashing", async ({ request }) => {
     test.setTimeout(120_000);
     const attempts: Promise<APIResponse>[] = [];
     for (let i = 0; i < 30; i++) {
-      attempts.push(
-        request.post("/api/paper/orders", {
-          data: {
-            symbol: "TEST",
-            side: "buy",
-            quantity: 1,
-            orderType: "market",
-          },
-        }),
-      );
-      attempts.push(
-        request.post("/api/paper/risk", {
-          data: { symbol: "TEST", conviction: 50 },
-        }),
-      );
-      attempts.push(
-        request.post("/api/research/copilot", {
-          data: { symbol: "TEST", question: "stress probe", mode: "copilot" },
-        }),
-      );
-      attempts.push(
-        request.post("/api/research/lab", {
-          data: { action: "experiment", hypothesis: "stress probe" },
-        }),
-      );
-      attempts.push(
-        request.post("/api/operations/notifications", {
-          data: { ruleKey: "stress", enabled: true },
-        }),
-      );
+      attempts.push(request.post("/api/paper/orders", { data: { symbol: "TEST", side: "buy", quantity: 1, orderType: "market" } }));
+      attempts.push(request.post("/api/paper/risk", { data: { symbol: "TEST", conviction: 50 } }));
+      attempts.push(request.post("/api/research/copilot", { data: { symbol: "TEST", question: "stress probe", mode: "copilot" } }));
+      attempts.push(request.post("/api/research/lab", { data: { action: "experiment", hypothesis: "stress probe" } }));
+      attempts.push(request.post("/api/operations/notifications", { data: { ruleKey: "stress", enabled: true } }));
     }
     const responses = await Promise.all(attempts);
     for (const response of responses) {
@@ -122,28 +81,12 @@ test.describe("extreme controlled stress", () => {
     }
   });
 
-  test("malformed and oversized requests fail deliberately without unhandled 500s", async ({
-    request,
-  }) => {
+  test("malformed and oversized requests fail deliberately without unhandled 500s", async ({ request }) => {
     const hugeSymbol = "X".repeat(5000);
     const cases = [
       request.get(`/api/market/intelligence?symbol=${hugeSymbol}`),
-      request.post("/api/paper/orders", {
-        headers: { "content-type": "application/json" },
-        data: {
-          symbol: hugeSymbol,
-          side: "buy",
-          quantity: -1,
-          orderType: "limit",
-        },
-      }),
-      request.post("/api/research/copilot", {
-        data: {
-          symbol: hugeSymbol,
-          question: "x".repeat(20_000),
-          mode: "copilot",
-        },
-      }),
+      request.post("/api/paper/orders", { headers: { "content-type": "application/json" }, data: { symbol: hugeSymbol, side: "buy", quantity: -1, orderType: "limit" } }),
+      request.post("/api/research/copilot", { data: { symbol: hugeSymbol, question: "x".repeat(20_000), mode: "copilot" } }),
     ];
     const responses = await Promise.all(cases);
     for (const response of responses) {
@@ -152,12 +95,25 @@ test.describe("extreme controlled stress", () => {
     }
   });
 
-  test("capital authority remains false across high-frequency reads", async ({
-    request,
-  }) => {
-    const responses = await Promise.all(
-      Array.from({ length: 50 }, () => request.get("/api/health")),
-    );
+  test("paper order submission requires a valid idempotency key", async ({ request }) => {
+    const payload = { symbol: "TEST", side: "buy", quantity: 1, orderType: "market" };
+    const [missing, shortKey, validShape] = await Promise.all([
+      request.post("/api/paper/orders", { data: payload }),
+      request.post("/api/paper/orders", { headers: { "idempotency-key": "short" }, data: payload }),
+      request.post("/api/paper/orders", { headers: { "idempotency-key": "stress-20260916-00000001" }, data: payload }),
+    ]);
+
+    expect(missing.status()).toBe(400);
+    expect(shortKey.status()).toBe(400);
+    expect([200, 400, 404, 409, 503]).toContain(validShape.status());
+    if (validShape.status() === 200 || validShape.status() === 409) {
+      const body = await validShape.json();
+      expect(body.capitalExecutionEnabled).toBe(false);
+    }
+  });
+
+  test("capital authority remains false across high-frequency reads", async ({ request }) => {
+    const responses = await Promise.all(Array.from({ length: 50 }, () => request.get("/api/health")));
     for (const response of responses) {
       expect(response.status()).toBe(200);
       const body = await response.json();

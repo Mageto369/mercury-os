@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Bell, BrainCircuit, Database, Gauge, Radar, RefreshCw, ShieldCheck, Sparkles, TrendingUp } from 'lucide-react';
 import { ActivationReadiness } from '@/components/activation-readiness';
 import { CommandDeck } from '@/components/command-deck';
+import { DiscoveryBoard, EventFeed, KillSwitchBoard, MarketOutlookBoard, ModelRegistryBoard, ResearchStatusBoard, ShadowBookBoard, SocialRadarBoard } from '@/components/workspace-boards';
 import { AgentFleet } from '@/components/agent-fleet';
 import { AutonomyConsole } from '@/components/autonomy-console';
 import { IntelligenceLab } from '@/components/intelligence-lab';
@@ -223,16 +224,16 @@ export function CommandCenter() {
         {lastRefresh && <div className="tiny" style={{marginTop:10}}>Last refreshed {new Date(lastRefresh).toLocaleString()}</div>}
       </>}
 
-      {tab === 'Market Outlook' && <section className="triple-grid"><StatusPanel title="Regime" route="/api/market/regime" refreshToken={refreshToken}/><StatusPanel title="Liquidity" route="/api/market/liquidity" refreshToken={refreshToken}/><StatusPanel title="Market Providers" route="/api/providers/market/status" refreshToken={refreshToken}/></section>}
-      {tab === 'Discovery' && <><StatusPanel title="Gem Discovery" route="/api/gems" refreshToken={refreshToken}/><OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/></>}
-      {tab === 'Social Radar' && <section className="hero-grid"><StatusPanel title="Social Trends" route="/api/social/trends" refreshToken={refreshToken}/><StatusPanel title="Source Reputation" route="/api/research/source-reputation?limit=10" refreshToken={refreshToken}/></section>}
+      {tab === 'Market Outlook' && <MarketOutlookBoard refreshToken={refreshToken}/>}
+      {tab === 'Discovery' && <><DiscoveryBoard refreshToken={refreshToken}/><OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/></>}
+      {tab === 'Social Radar' && <SocialRadarBoard refreshToken={refreshToken}/>}
       {tab === 'Opportunities' && <><OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/>{current && <OpportunityDetail opportunity={current}/>}</>}
-      {tab === 'Portfolio' && <><ShadowPerformance/><PromotionGate/><StatusPanel title="Shadow Portfolio" route="/api/portfolio/shadow" refreshToken={refreshToken}/></>}
-      {tab === 'Risk' && <><StatusPanel title="Kill Switches" route="/api/risk/kill-switches" refreshToken={refreshToken}/><IntelligenceLab/></>}
-      {tab === 'Research' && <><StatusPanel title="Research Proof" route="/api/integrations/research-proof" refreshToken={refreshToken}/><StatusPanel title="Historical Research" route="/api/research/history" refreshToken={refreshToken}/><IntelligenceLab/></>}
-      {tab === 'Models' && <><StatusPanel title="Model Governance" route="/api/models/governance" refreshToken={refreshToken}/><StatusPanel title="Deep Intelligence" route="/api/intelligence/deep" refreshToken={refreshToken}/><IntelligenceLab/></>}
+      {tab === 'Portfolio' && <><ShadowPerformance/><PromotionGate/><ShadowBookBoard refreshToken={refreshToken}/></>}
+      {tab === 'Risk' && <><KillSwitchBoard refreshToken={refreshToken}/><IntelligenceLab/></>}
+      {tab === 'Research' && <><ResearchStatusBoard refreshToken={refreshToken}/><IntelligenceLab/></>}
+      {tab === 'Models' && <><ModelRegistryBoard refreshToken={refreshToken}/><IntelligenceLab/></>}
       {tab === 'Workflows' && <><AutonomyConsole/><AgentFleet/></>}
-      {tab === 'Audit' && <><ActivationReadiness/><LiveWarehousePanel/><StatusPanel title="Recent System Events" route="/api/events/recent" refreshToken={refreshToken}/></>}
+      {tab === 'Audit' && <><ActivationReadiness/><LiveWarehousePanel/><EventFeed refreshToken={refreshToken}/></>}
     </main>
   </div>;
 }
@@ -259,25 +260,6 @@ function OpportunityDetail({ opportunity }: { opportunity: Opportunity }) {
     <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{input.price == null ? '—' : `$${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}`}</strong><span className="good">Asym {decision.asymmetry}</span></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{value}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, n(value)))}%` }} /></span></div>)}</div></div>
     <div className="surface allocation-card"><h2>Decision Brain</h2><div className="allocation-action"><span>Current shadow action</span><strong>{decision.action?.replaceAll('_',' ')}</strong><p>{decision.reasons?.slice(0,3).join(' · ') || 'No rationale recorded.'}</p></div><div className="allocation-list"><div><span>Aggression</span><b>{decision.aggression}/5</b></div><div><span>Alpha</span><b>{decision.alpha}</b></div><div><span>Hard blocked</span><b>{decision.hardBlocked ? 'YES' : 'NO'}</b></div><div><span>Float</span><b>{input.floatShares == null ? '—' : `${(input.floatShares / 1e6).toFixed(1)}M`}</b></div></div></div>
   </section>;
-}
-
-function StatusPanel({ title, route, refreshToken }: { title: string; route: string; refreshToken: number }) {
-  const [data, setData] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let active = true;
-    setLoading(true); setError(null);
-    fetch(route, { cache: 'no-store' }).then(async (response) => {
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.error ?? `HTTP ${response.status}`);
-      if (active) setData(body);
-    }).catch((e) => active && setError(e instanceof Error ? e.message : 'Request failed')).finally(() => active && setLoading(false));
-    return () => { active = false; };
-  }, [route, refreshToken]);
-
-  const entries = data ? Object.entries(data).filter(([key, value]) => !['payload','opportunities','events','rows','items','providers','jobs','assignments'].includes(key) && (typeof value !== 'object' || value === null)).slice(0,8) : [];
-  return <div className="surface mini-panel"><div className="section-head"><div><h3>{title}</h3><p>{route}</p></div>{loading && <RefreshCw size={16} className="spin"/>}</div>{error ? <div className="danger">{error}</div> : entries.length ? entries.map(([key,value]) => <div className="source-row" key={key}><span>{key}</span><b>{String(value ?? '—')}</b></div>) : <div className="muted2">{loading ? 'Loading…' : 'Connected; no scalar report fields returned.'}</div>}{data && <details style={{marginTop:10}}><summary className="tiny">View full report</summary><pre style={{whiteSpace:'pre-wrap',overflow:'auto',fontSize:11}}>{JSON.stringify(data,null,2)}</pre></details>}</div>;
 }
 
 function EmptyPanel({ title, detail }: { title: string; detail: string }) {

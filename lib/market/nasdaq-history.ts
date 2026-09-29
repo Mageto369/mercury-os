@@ -18,6 +18,12 @@ export interface SymbolPriceHistory {
   rangePositionPct: number | null;
   extension20Pct: number | null;
   closeLocationPct: number | null;
+  rise: RiseRoom;
+}
+
+export interface RiseRoom {
+  score: number | null;
+  room: boolean;
 }
 
 const EMPTY_HISTORY: SymbolPriceHistory = {
@@ -32,6 +38,7 @@ const EMPTY_HISTORY: SymbolPriceHistory = {
   rangePositionPct: null,
   extension20Pct: null,
   closeLocationPct: null,
+  rise: { score: null, room: false },
 };
 
 const EXTENSION_SESSIONS = 20;
@@ -86,6 +93,43 @@ function closeLocation(bars: StoredDailyBar[], sameAsLast: boolean) {
   return rangePosition(latest.close, latest.high, latest.low);
 }
 
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, value));
+}
+
+function trendScore(return5Pct: number) {
+  if (return5Pct < 0) return clampScore(30 + return5Pct * 3);
+  if (return5Pct <= 12) return clampScore(60 + return5Pct * (10 / 3));
+  return clampScore(100 - (return5Pct - 12) * 3);
+}
+
+function roomDistanceScore(extension20Pct: number) {
+  if (extension20Pct < 0) return clampScore(40 + extension20Pct * 4);
+  if (extension20Pct <= 8) return clampScore(70 + extension20Pct * 3.75);
+  return clampScore(100 - (extension20Pct - 8) * 4);
+}
+
+/** Higher when the rise is confirmed and the price is still near the 20-session average. */
+export function scoreRiseRoom(input: {
+  return5Pct: number | null;
+  relativeVolume: number | null;
+  extension20Pct: number | null;
+  closeLocationPct: number | null;
+}): RiseRoom {
+  const { return5Pct, relativeVolume, extension20Pct, closeLocationPct } = input;
+  if (return5Pct == null || relativeVolume == null || extension20Pct == null || closeLocationPct == null) {
+    return { score: null, room: false };
+  }
+  const score = Math.round(
+    roomDistanceScore(extension20Pct) * 0.4
+    + closeLocationPct * 0.25
+    + trendScore(return5Pct) * 0.2
+    + clampScore(relativeVolume * 50) * 0.15,
+  );
+  const room = return5Pct > 0 && relativeVolume > 1 && extension20Pct > 0 && extension20Pct < 15 && closeLocationPct >= 60;
+  return { score, room };
+}
+
 export function summarizePriceHistory(price: number | null, bars: StoredDailyBar[]): SymbolPriceHistory {
   const ordered = [...bars].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
   const closes = ordered.map((bar) => bar.close);
@@ -96,7 +140,7 @@ export function summarizePriceHistory(price: number | null, bars: StoredDailyBar
   const previousClose = sameAsLast ? prior : latest;
   const high = Number(Math.max(...closes).toFixed(4));
   const low = Number(Math.min(...closes).toFixed(4));
-  return {
+  const summary = {
     closes,
     sessions: [...ordered].reverse().slice(0, 8),
     previousClose,
@@ -109,6 +153,7 @@ export function summarizePriceHistory(price: number | null, bars: StoredDailyBar
     extension20Pct: extension20(price, closes),
     closeLocationPct: closeLocation(ordered, sameAsLast),
   };
+  return { ...summary, rise: scoreRiseRoom(summary) };
 }
 
 export interface NasdaqDailyBar {

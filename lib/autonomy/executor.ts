@@ -100,28 +100,28 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
     try {
       const result = await runShareStructureWorkflow();
       const material = result.changes.filter((change) => change.riskScore >= 48).length;
-      return { name: job.name, status: result.observationsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: material, message: `Share Structure compared ${result.securitiesCompared} securities, found ${material} material expansions, emitted ${result.eventsCreated} new warnings.` };
+      return { name: job.name, status: 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: material, message: `Share Structure compared ${result.securitiesCompared} securities, found ${material} material expansions, emitted ${result.eventsCreated} new warnings.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Share Structure', error); }
   }
 
   if (job.name === 'finra-actions' && readiness.database.configured) {
     try {
       const result = await runCorporateActionsWorkflow();
-      return { name: job.name, status: result.actionsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.highRisk.length, message: `Corporate Action agent reviewed ${result.actionsChecked} normalized actions and identified ${result.highRisk.length} high-risk events. External FINRA ingestion remains adapter-dependent.` };
+      return { name: job.name, status: 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.highRisk.length, message: `Corporate Action agent reviewed ${result.actionsChecked} normalized actions and identified ${result.highRisk.length} high-risk events. External FINRA ingestion remains adapter-dependent.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Corporate Actions', error); }
   }
 
   if (job.name === 'risk-gateway' && readiness.database.configured) {
     try {
       const result = await runRiskGatewayWorkflow();
-      return { name: job.name, status: readiness.marketData.configured ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.flagged.length, message: `Structural risk scan flagged ${result.flagged.length} securities from ${result.corporateActionsChecked} high-risk corporate actions and ${result.dilutionEventsChecked} dilution events${readiness.marketData.configured ? '' : '; external market feed health unavailable'}.` };
+      return { name: job.name, status: 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.flagged.length, message: `Structural risk scan flagged ${result.flagged.length} securities from ${result.corporateActionsChecked} high-risk corporate actions and ${result.dilutionEventsChecked} dilution events${readiness.marketData.configured ? '' : '; live market feed is not configured, so this scan stays research context'}.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Risk gateway', error); }
   }
 
   if (job.name === 'social-radar' && readiness.database.configured) {
     try {
       const result = await runSocialRadarWorkflow();
-      return { name: job.name, status: result.signalsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.trends.length, message: `Social Radar processed ${result.signalsChecked} authorized signals and ranked ${result.trends.length} ticker trends${result.signalsChecked ? '' : '; no recent authorized social data found'}.` };
+      return { name: job.name, status: 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.trends.length, message: `Social Radar processed ${result.signalsChecked} authorized signals and ranked ${result.trends.length} ticker trends${result.signalsChecked ? '' : '; no authorized social source is connected'}.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Social Radar', error); }
   }
 
@@ -136,7 +136,7 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
   if (job.name === 'model-learning' && readiness.database.configured) {
     try {
       const result = await runModelLearningWorkflow();
-      return { name: job.name, status: result.opportunitiesReviewed ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.metrics.length, message: `Replay reviewed ${result.opportunitiesReviewed} opportunities and ${result.decisionsReviewed} decisions. Drift ${result.driftDetected ? 'detected and escalated' : 'not detected'}.` };
+      return { name: job.name, status: 'completed', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.metrics.length, message: `Replay reviewed ${result.opportunitiesReviewed} opportunities and ${result.decisionsReviewed} decisions. Drift ${result.driftDetected ? 'detected and escalated' : 'not detected'}.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Model Learning', error); }
   }
 

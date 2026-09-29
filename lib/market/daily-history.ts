@@ -13,8 +13,8 @@ export async function loadDailyHistory(symbols: string[]) {
   if (!wanted.length) return histories;
   const sql = getSql();
   if (!sql) return histories;
-  const rows = await sql<{ symbol: string; bar_time: Date | string; close: string | number; volume: string | number | null }[]>`
-    select s.symbol, h.bar_time, h.close, h.volume
+  const rows = await sql<{ symbol: string; bar_time: Date | string; close: string | number; high: string | number | null; low: string | number | null; volume: string | number | null }[]>`
+    select s.symbol, h.bar_time, h.close, h.high, h.low, h.volume
     from historical_bars h
     join securities s on s.id = h.security_id
     where upper(s.symbol) in ${sql(wanted)}
@@ -33,9 +33,13 @@ export async function loadDailyHistory(symbols: string[]) {
     const close = Number(row.close);
     if (!Number.isFinite(close) || close <= 0) continue;
     const volume = row.volume == null ? null : Number(row.volume);
+    const high = row.high == null ? null : Number(row.high);
+    const low = row.low == null ? null : Number(row.low);
     bucket.push({
       date: new Date(row.bar_time).toISOString().slice(0, 10),
       close,
+      high: high != null && Number.isFinite(high) && high > 0 ? high : null,
+      low: low != null && Number.isFinite(low) && low > 0 ? low : null,
       volume: volume != null && Number.isFinite(volume) ? volume : null,
     });
     grouped.set(symbol, bucket);

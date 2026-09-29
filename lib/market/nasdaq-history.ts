@@ -2,6 +2,8 @@ export interface StoredDailyBar {
   date: string;
   close: number;
   volume: number | null;
+  high?: number | null;
+  low?: number | null;
 }
 
 export interface SymbolPriceHistory {
@@ -14,6 +16,8 @@ export interface SymbolPriceHistory {
   return5Pct: number | null;
   relativeVolume: number | null;
   rangePositionPct: number | null;
+  extension20Pct: number | null;
+  closeLocationPct: number | null;
 }
 
 const EMPTY_HISTORY: SymbolPriceHistory = {
@@ -26,7 +30,11 @@ const EMPTY_HISTORY: SymbolPriceHistory = {
   return5Pct: null,
   relativeVolume: null,
   rangePositionPct: null,
+  extension20Pct: null,
+  closeLocationPct: null,
 };
+
+const EXTENSION_SESSIONS = 20;
 
 const RELATIVE_VOLUME_BASELINE = 20;
 const RELATIVE_VOLUME_MIN_SESSIONS = 5;
@@ -64,6 +72,20 @@ function rangePosition(price: number | null, high: number | null, low: number | 
   return Number((((price - low) / span) * 100).toFixed(0));
 }
 
+function extension20(price: number | null, closes: number[]) {
+  if (price == null || closes.length < EXTENSION_SESSIONS) return null;
+  const window = closes.slice(-EXTENSION_SESSIONS);
+  const average = window.reduce((sum, close) => sum + close, 0) / window.length;
+  return percentChange(average, price);
+}
+
+function closeLocation(bars: StoredDailyBar[], sameAsLast: boolean) {
+  if (!sameAsLast) return null;
+  const latest = bars[bars.length - 1];
+  if (!latest || latest.high == null || latest.low == null) return null;
+  return rangePosition(latest.close, latest.high, latest.low);
+}
+
 export function summarizePriceHistory(price: number | null, bars: StoredDailyBar[]): SymbolPriceHistory {
   const ordered = [...bars].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
   const closes = ordered.map((bar) => bar.close);
@@ -84,6 +106,8 @@ export function summarizePriceHistory(price: number | null, bars: StoredDailyBar
     return5Pct: percentChange(closeSessionsAgo(closes, 5, sameAsLast), price),
     relativeVolume: relativeVolume(ordered, sameAsLast),
     rangePositionPct: rangePosition(price, high, low),
+    extension20Pct: extension20(price, closes),
+    closeLocationPct: closeLocation(ordered, sameAsLast),
   };
 }
 

@@ -33,6 +33,27 @@ test('change uses the prior session when the latest bar matches the quoted price
   assert.equal(history.return5Pct, null);
   assert.equal(history.relativeVolume, null);
   assert.equal(history.rangePositionPct, 100);
+  assert.equal(history.extension20Pct, null);
+  assert.equal(history.closeLocationPct, null);
+});
+
+test('extension uses twenty closes and the close location uses that session high and low', () => {
+  const bars = Array.from({ length: 19 }, (_, index) => ({
+    date: `2026-08-${String(index + 1).padStart(2, '0')}`,
+    close: 2,
+    volume: 100,
+    high: 2.1,
+    low: 1.9,
+  }));
+  bars.push({ date: '2026-09-01', close: 2.2, volume: 100, high: 2.4, low: 1.8 });
+  const history = summarizePriceHistory(2.2, bars);
+  assert.equal(history.extension20Pct, 9.45);
+  assert.equal(history.closeLocationPct, 67);
+  const early = summarizePriceHistory(2.3, bars.slice(0, 19));
+  assert.equal(early.extension20Pct, null);
+  const ahead = summarizePriceHistory(2.3, bars);
+  assert.equal(ahead.closeLocationPct, null);
+  assert.equal(ahead.extension20Pct, 14.43);
 });
 
 test('five-session return, relative volume, and range use the stored bars', () => {
@@ -69,5 +90,7 @@ test('an empty history does not invent a change', () => {
   assert.equal(history.return5Pct, null);
   assert.equal(history.relativeVolume, null);
   assert.equal(history.rangePositionPct, null);
+  assert.equal(history.extension20Pct, null);
+  assert.equal(history.closeLocationPct, null);
   assert.deepEqual(history.closes, []);
 });

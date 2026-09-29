@@ -5,6 +5,7 @@ import { nasdaqDelayedMarketProvider } from '@/lib/providers/market/nasdaq-delay
 import type { MarketProvider, MarketProviderName, MarketProviderPullResult } from '@/lib/providers/market/types';
 import { toJsonbBase64 } from '@/lib/db/json';
 import { persistMarketSnapshots } from '@/lib/providers/market/persist';
+import { PENNY_MAX_PRICE } from '@/lib/workflows/penny-screen';
 
 const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider, 'nasdaq-delayed': nasdaqDelayedMarketProvider };
 function selectedProviders(): MarketProvider[] { const configuredMode=(process.env.MARKET_DATA_PROVIDER??'auto').toLowerCase();if(configuredMode==='massive')return[providers.massive];if(configuredMode==='intrinio')return[providers.intrinio];if(configuredMode==='nasdaq-delayed')return[providers['nasdaq-delayed']];return[providers.massive,providers.intrinio,providers['nasdaq-delayed']]; }
@@ -41,9 +42,12 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
  // every symbol after the first batch permanently untouched.
  const universe=await sql`
    WITH latest AS (
-     SELECT ms.security_id,max(coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz,ms.observed_at)) AS last_snapshot_at
+     SELECT DISTINCT ON (ms.security_id)
+       ms.security_id,
+       ms.price::float AS price,
+       coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz, ms.observed_at) AS last_snapshot_at
      FROM market_snapshots ms
-     GROUP BY ms.security_id
+     ORDER BY ms.security_id, coalesce(nullif(ms.payload->>'ingestedAt','')::timestamptz, ms.observed_at) DESC
    ), attempted AS (
      SELECT mpa.security_id,max(mpa.last_attempt_at) AS last_attempt_at
      FROM market_pull_attempts mpa
@@ -54,7 +58,14 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
    LEFT JOIN latest ON latest.security_id=s.id
    LEFT JOIN attempted ON attempted.security_id=s.id
    WHERE s.active = true AND s.id NOT LIKE 'validation:%'
-   ORDER BY greatest(latest.last_snapshot_at,attempted.last_attempt_at) ASC NULLS FIRST, s.symbol
+   ORDER BY
+     CASE
+       WHEN latest.price IS NULL THEN 0
+       WHEN latest.price > 0 AND latest.price < ${PENNY_MAX_PRICE} THEN 1
+       ELSE 2
+     END,
+     greatest(latest.last_snapshot_at,attempted.last_attempt_at) ASC NULLS FIRST,
+     s.symbol
    LIMIT ${maxSymbols}`;
  const symbols=universe.map(row=>String(row.symbol));if(!symbols.length)return{ok:false as const,reason:'universe_empty' as const,attempts:[] as MarketProviderPullResult[]};
  const securityIds=new Map(universe.map(row=>[String(row.symbol),String(row.id)]));const attempts:MarketProviderPullResult[]=[];let winner:MarketProviderPullResult|null=null;

@@ -108,7 +108,7 @@ export function DiscoveryBoard({ refreshToken }: { refreshToken: number }) {
   const candidates = Array.isArray(gems.data?.candidates) ? gems.data.candidates.slice(0, 15) : [];
   const total = Array.isArray(gems.data?.candidates) ? gems.data.candidates.length : 0;
   return <article className="surface opportunity-card">
-    <div className="section-head"><div><h2>Gem candidates</h2><p>{gems.loading ? 'Ranking the research universe.' : total ? `Showing ${candidates.length} of ${total}. Blank catalyst, structure, and attention were not observed.` : 'Gem discovery has not ranked a universe yet.'}</p></div></div>
+    <div className="section-head"><div><h2>Gem candidates</h2><p>{gems.loading ? 'Ranking the penny screen.' : total ? `Showing ${candidates.length} of ${total} penny names. Common stock under $5 with at least $100,000 of dollar volume. Blank catalyst, structure, and attention were not observed.` : 'No penny-screen gem candidates yet.'}</p></div></div>
     {candidates.length ? <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Gem</th><th>Liquidity</th><th>Catalyst</th><th>Structure</th><th>Attention gap</th><th>Why</th></tr></thead><tbody>{candidates.map((candidate) => {
       const row = candidate as { symbol?: string; gemScore?: number | null; liquidityScore?: number | null; catalystScore?: number | null; structureScore?: number | null; attentionGapScore?: number | null; reasons?: string[] };
       const cell = (value: number | null | undefined) => value == null ? '—' : value;

@@ -1,5 +1,6 @@
 import { getSql } from "@/lib/db";
 import { submitPaperOrder } from "@/lib/paper/submit-order";
+import { screenPennyStock } from "@/lib/workflows/penny-screen";
 
 export type PaperEngineAction = "PRESS" | "WAVE_ACTIVE" | "GEM_WATCH" | "WATCH" | "REDUCE" | "EXIT" | "BLOCK";
 
@@ -123,6 +124,7 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
     const notional = Number(position.notional ?? 0);
     const price = Number(position.price ?? 0);
     if (!symbol || !opportunityId) continue;
+    if (!screenPennyStock({ symbol, price: Number.isFinite(price) ? price : null }).pass) continue;
     buys.push({ symbol, opportunityId, action, notional, price });
   }
 

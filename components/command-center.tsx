@@ -105,11 +105,12 @@ function evidenceBanner(mode: string, evidenceScope: string) {
 }
 
 function opportunityTableCaption(ranked: Opportunity[]) {
+  const screen = 'Penny screen keeps common stock under $5 with at least $100,000 of dollar volume.';
   const reference = ranked.filter((row) => row.modelVersion === 'mercury-delayed-reference-v1').length;
-  if (ranked.length > 0 && reference === ranked.length) return 'Delayed Nasdaq reference rows. They do not count as live proof.';
-  if (reference > 0) return 'Live and delayed-reference rows. Delayed rows do not count as live proof.';
-  if (ranked.length > 0) return 'Live-only ranked opportunity rows from the warehouse.';
-  return 'No ranked rows yet.';
+  if (ranked.length > 0 && reference === ranked.length) return `Delayed Nasdaq reference rows. They do not count as live proof. ${screen}`;
+  if (reference > 0) return `Live and delayed-reference rows. Delayed rows do not count as live proof. ${screen}`;
+  if (ranked.length > 0) return `Live-only ranked opportunity rows from the warehouse. ${screen}`;
+  return `No penny-screen rows yet. ${screen}`;
 }
 
 function n(value: unknown, fallback = 0) {

@@ -2,6 +2,7 @@ import { gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { systemEvents } from '@/lib/db/schema';
 import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
+import { PENNY_MAX_PRICE, PENNY_MIN_DOLLAR_VOLUME, screenPennyStock } from '@/lib/workflows/penny-screen';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
@@ -30,6 +31,13 @@ export interface GemDiscoveryResult {
   candidates: GemCandidate[];
   universeSize: number;
   marketOutlook: number;
+  screen: {
+    name: 'penny';
+    maxPrice: number;
+    minDollarVolume: number;
+    considered: number;
+    admitted: number;
+  };
 }
 
 function clamp(value: number) {
@@ -68,7 +76,14 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
   const riskBySymbol = new Map(risk.flagged.map((flag) => [flag.symbol, flag]));
   const marketOutlook = regime.outlookScore;
 
-  const candidates = liquidity.signals.map((liquiditySignal) => {
+  const pennySignals = liquidity.signals.filter((liquiditySignal) => screenPennyStock({
+    symbol: liquiditySignal.symbol,
+    price: liquiditySignal.price,
+    dollarVolume: liquiditySignal.dollarVolume,
+    spreadBps: liquiditySignal.spreadBps,
+  }).pass);
+
+  const candidates = pennySignals.map((liquiditySignal) => {
     const socialSignal = socialBySymbol.get(liquiditySignal.symbol);
     const riskFlag = riskBySymbol.get(liquiditySignal.symbol);
     const catalystScore = catalystBySymbol.has(liquiditySignal.symbol)
@@ -108,5 +123,12 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
     candidates,
     universeSize: liquidity.signals.length,
     marketOutlook,
+    screen: {
+      name: 'penny',
+      maxPrice: PENNY_MAX_PRICE,
+      minDollarVolume: PENNY_MIN_DOLLAR_VOLUME,
+      considered: liquidity.signals.length,
+      admitted: pennySignals.length,
+    },
   };
 }

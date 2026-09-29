@@ -3,6 +3,7 @@ import { getSql } from '@/lib/db';
 import { executionQuoteAssumptions } from '@/lib/execution/quote-assumptions';
 import { simulateExecution } from '@/lib/execution/simulator';
 import { toJsonb } from '@/lib/db/json';
+import { screenPennyStock } from '@/lib/workflows/penny-screen';
 
 export async function buildShadowPortfolio() {
   const sql = getSql();
@@ -47,7 +48,13 @@ export async function buildShadowPortfolio() {
     const row = candidate.row;
     const dollarVolume = Number(row.dollar_volume ?? 0);
     const price = Number(row.price ?? 0);
-    if (!Number.isFinite(dollarVolume) || dollarVolume <= 0 || !Number.isFinite(price) || price <= 0) continue;
+    const screen = screenPennyStock({
+      symbol: String(row.symbol ?? ''),
+      price: Number.isFinite(price) ? price : null,
+      dollarVolume: Number.isFinite(dollarVolume) ? dollarVolume : null,
+      spreadBps: row.spread_bps == null ? null : Number(row.spread_bps),
+    });
+    if (!screen.pass) continue;
     const convictionScale = Math.max(0.1, Math.min(1, candidate.quality / 100));
     const desired = Math.min(maxPosition * convictionScale, maxGross - grossExposure);
     const assumptions = executionQuoteAssumptions(row);

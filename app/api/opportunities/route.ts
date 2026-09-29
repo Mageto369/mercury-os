@@ -4,7 +4,7 @@ import { scoreOpportunity } from '@/lib/alpha/scoring';
 import type { OpportunityInput } from '@/lib/domain/types';
 import { sampleUniverse } from '@/lib/intelligence/sample-universe';
 import { loadDailyHistory } from '@/lib/market/daily-history';
-import { applyPricePush, EMPTY_PRICE_PUSH } from '@/lib/market/price-push';
+import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
 import { summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
@@ -145,6 +145,63 @@ function scorePennyRow(row: Record<string, unknown>, marketOutlook: number) {
     state,
     observedAt: row.observed_at ?? row.market_observed_at,
     modelVersion,
+    locked: stored,
+  };
+}
+
+function positiveOrNull(value: number | null) {
+  return value != null && value > 0 ? value : null;
+}
+
+function applyObservedPush<T extends ReturnType<typeof scorePennyRow>>(opportunity: T, push: PricePush, marketOutlook: number) {
+  const catalystScore = observedCatalystScore(push);
+  const socialScore = push.socialHype;
+  const input = {
+    ...opportunity.input,
+    catalyst: catalystScore ?? positiveOrNull(opportunity.input.catalyst),
+    social: displaySocialScore(push, positiveOrNull(opportunity.input.social)),
+  };
+  if (opportunity.locked || (catalystScore == null && socialScore == null && !push.blocksRoom)) {
+    return { ...opportunity, input };
+  }
+  const decision = scoreOpportunity({
+    symbol: String(input.symbol ?? ''),
+    market: listingMarket(input.market),
+    price: input.price ?? 0,
+    marketCapUsd: 0,
+    floatShares: input.floatShares ?? 0,
+    avgDollarVolume20d: input.avgDollarVolume20d ?? 0,
+    gem: input.gem,
+    wave: input.wave,
+    catalyst: catalystScore ?? 0,
+    social: socialScore ?? 0,
+    liquidity: input.liquidity,
+    marketOutlook,
+    reverseSplitRisk: 0,
+    dilutionRisk: push.blocksRoom ? 70 : 0,
+    promotionRisk: 0,
+    trapRisk: input.trapRisk,
+    peakRisk: input.peakRisk,
+    confidence: input.confidence,
+    state: 'DORMANT',
+  });
+  const extras = [
+    catalystScore != null ? 'observed filing catalyst' : null,
+    socialScore != null ? 'observed social attention' : null,
+    push.blocksRoom ? 'recent financing registration' : null,
+  ].filter((reason): reason is string => reason != null);
+  return {
+    ...opportunity,
+    input,
+    decision: {
+      ...opportunity.decision,
+      alpha: decision.alpha,
+      asymmetry: decision.asymmetry,
+      aggression: decision.aggression,
+      action: decision.action,
+      hardBlocked: decision.hardBlocked,
+      reasons: [...new Set([...(opportunity.decision.reasons ?? []), ...decision.reasons, ...extras])],
+    },
   };
 }
 
@@ -219,12 +276,12 @@ export async function GET() {
     ]);
     const withHistory = opportunities.map((opportunity) => {
       const symbol = String(opportunity.input.symbol).toUpperCase();
+      const push = pushes.get(symbol) ?? EMPTY_PRICE_PUSH;
       const history = summarizePriceHistory(opportunity.input.price, histories.get(symbol) ?? []);
-      const push = pushes.get(symbol);
       return {
-        ...opportunity,
+        ...applyObservedPush(opportunity, push, regime.outlookScore),
         push,
-        history: { ...history, rise: applyPricePush(history.rise, push ?? EMPTY_PRICE_PUSH) },
+        history: { ...history, rise: applyPricePush(history.rise, push) },
       };
     });
 

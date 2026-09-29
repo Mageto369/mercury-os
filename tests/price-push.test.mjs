@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { classifyFilingForm } from '../lib/intelligence/filing-classifier.ts';
-import { applyPricePush, scorePricePush, socialHypeScore } from '../lib/market/price-push.ts';
+import { applyPricePush, displaySocialScore, observedCatalystScore, scorePricePush, socialHypeScore } from '../lib/market/price-push.ts';
 import { parseStocktwitsStream } from '../lib/market/stocktwits.ts';
 
 const asOf = '2026-09-29';
@@ -9,7 +8,7 @@ const asOf = '2026-09-29';
 test('a recent 8-K is news and a dilution filing blocks room', () => {
   const news = scorePricePush([{ form: '8-K', filedOn: '2026-09-20' }], null, asOf);
   assert.equal(news.newsForm, '8-K');
-  assert.equal(news.newsLabel, classifyFilingForm('8-K').label);
+  assert.equal(news.newsLabel, 'material corporate event');
   assert.equal(news.blocksRoom, false);
   assert.equal(news.adjustment, 12);
   const dilution = scorePricePush([
@@ -33,6 +32,17 @@ test('a Stocktwits page counts bullish and bearish tags and an empty page is qui
   assert.deepEqual(snapshot, { mentions: 3, bullish: 1, bearish: 1, watchers: 593 });
   assert.deepEqual(parseStocktwitsStream({ messages: [] }), { mentions: 0, bullish: 0, bearish: 0, watchers: 0 });
   assert.equal(parseStocktwitsStream({}), null);
+});
+
+test('an 8-K becomes a catalyst score and a missing filing stays blank', () => {
+  const filing = scorePricePush([{ form: '8-K', filedOn: '2026-09-20' }], null, asOf);
+  assert.equal(observedCatalystScore(filing), 70);
+  assert.equal(observedCatalystScore(scorePricePush([{ form: 'S-1', filedOn: '2026-09-20' }], null, asOf)), null);
+  assert.equal(observedCatalystScore(scorePricePush([], null, asOf)), null);
+  const missing = scorePricePush([], null, asOf);
+  assert.equal(displaySocialScore(missing, 8), 8);
+  assert.equal(displaySocialScore({ ...missing, socialUnavailable: true }, 8), null);
+  assert.equal(displaySocialScore({ ...missing, socialHype: 73, socialUnavailable: true }, 8), 73);
 });
 
 test('a filing outside two weeks and a missing social feed add nothing', () => {

@@ -31,6 +31,7 @@ export interface PricePush {
   newsForm: string | null;
   blocksRoom: boolean;
   socialHype: number | null;
+  socialUnavailable: boolean;
   adjustment: number | null;
 }
 
@@ -39,6 +40,7 @@ export const EMPTY_PRICE_PUSH: PricePush = {
   newsForm: null,
   blocksRoom: false,
   socialHype: null,
+  socialUnavailable: false,
   adjustment: null,
 };
 
@@ -99,8 +101,26 @@ export function scorePricePush(filings: FilingObservation[], social: SocialObser
     newsForm: lead ? lead.filing.form : null,
     blocksRoom: Boolean(dilution),
     socialHype,
+    socialUnavailable: false,
     adjustment: used ? Number(adjustment.toFixed(2)) : null,
   };
+}
+
+/** A Stocktwits miss stays blank. A stored model score is only a fallback when the feed has not been read. */
+export function displaySocialScore(push: PricePush, stored: number | null | undefined): number | null {
+  if (push.socialHype != null) return push.socialHype;
+  if (push.socialUnavailable) return null;
+  return stored != null && stored > 0 ? stored : null;
+}
+
+export function observedCatalystScore(push: PricePush): number | null {
+  if (!push.newsForm || push.blocksRoom) return null;
+  const form = push.newsForm.toUpperCase();
+  if (form === "8-K") return 70;
+  if (form === "10-Q" || form === "10-K") return 45;
+  if (form === "4") return 30;
+  if (form === "DEF 14A") return 20;
+  return null;
 }
 
 function clampScore(value: number) {

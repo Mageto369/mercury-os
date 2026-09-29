@@ -5,6 +5,7 @@ import { nasdaqDelayedMarketProvider } from '@/lib/providers/market/nasdaq-delay
 import type { MarketProvider, MarketProviderName, MarketProviderPullResult } from '@/lib/providers/market/types';
 import { toJsonbBase64 } from '@/lib/db/json';
 import { persistMarketSnapshots } from '@/lib/providers/market/persist';
+import { refreshStalePennyContext } from '@/lib/market/attention';
 import { PENNY_MAX_PRICE } from '@/lib/workflows/penny-screen';
 
 const providers: Record<MarketProviderName, MarketProvider> = { massive: massiveMarketProvider, intrinio: intrinioMarketProvider, 'nasdaq-delayed': nasdaqDelayedMarketProvider };
@@ -87,5 +88,7 @@ export async function pullAndPersistMarketData(maxSymbolsOverride?:number){
    throw error;
  }
  await recordHealth(providers[winner.provider],true,winner);
- return{ok:true as const,provider:winner.provider,inserted,requested:symbols.length,received:winner.received,errors:winner.errors,attempts,mode:'shadow' as const,capitalExecutionEnabled:false as const,completedAt:new Date().toISOString()};
+ let attention = { socialRequested: 0, socialInserted: 0, historyRequested: 0, historyInserted: 0 };
+ try { attention = await refreshStalePennyContext(8); } catch { attention = { socialRequested: 0, socialInserted: 0, historyRequested: 0, historyInserted: 0 }; }
+ return{ok:true as const,provider:winner.provider,inserted,requested:symbols.length,received:winner.received,errors:winner.errors,attempts,attention,mode:'shadow' as const,capitalExecutionEnabled:false as const,completedAt:new Date().toISOString()};
 }

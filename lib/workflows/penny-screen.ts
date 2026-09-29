@@ -50,10 +50,13 @@ export function screenPennyStock(input: PennyScreenInput): PennyScreenResult {
   return { pass: reasons.length === 0, reasons };
 }
 
-/** New simulated buys. Penny screen first, then the rise-with-room rank. */
-export function screenPaperBuy(input: { symbol: string; price: number | null; room: boolean }): PennyScreenResult {
+/** New simulated buys. Penny screen, then room, then a positive average outcome. */
+export function screenPaperBuy(input: { symbol: string; price: number | null; room: boolean; expectancyPct: number | null }): PennyScreenResult {
   const penny = screenPennyStock({ symbol: input.symbol, price: input.price });
   if (!penny.pass) return penny;
   if (!input.room) return { pass: false, reasons: ['rise is not marked room'] };
-  return { pass: true, reasons: ['rise with room'] };
+  if (input.expectancyPct == null || !Number.isFinite(input.expectancyPct) || !(input.expectancyPct > 0)) {
+    return { pass: false, reasons: ['expectancy is not positive'] };
+  }
+  return { pass: true, reasons: ['rise with room and positive expectancy'] };
 }

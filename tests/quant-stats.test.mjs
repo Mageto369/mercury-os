@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { averageTrueRangePct, dailyVolatilityPct, pathExcursion, sessionRisk, volTargetShares } from '../lib/market/quant-stats.ts';
+import { averageTrueRangePct, dailyVolatilityPct, pathExcursion, sessionRisk, tradePlan, volTargetShares } from '../lib/market/quant-stats.ts';
 import { rankDailyConsiderations } from '../lib/market/daily-rank.ts';
 
 test('volatility uses the last twenty returns and the size risks fifty dollars', () => {
@@ -35,6 +35,8 @@ test('average true range needs a full fourteen-session window', () => {
 
 test('the forward path keeps the worst and best close', () => {
   assert.deepEqual(pathExcursion(10, [9, 8, 11, 12, 10]), { adversePct: -20, favorablePct: 20 });
+  assert.deepEqual(tradePlan(3.74, -1.84, 3.05), { stop: 3.67, target: 3.85, rMultiple: 1.66 });
+  assert.deepEqual(tradePlan(null, -1, 2), { stop: null, target: null, rMultiple: null });
 });
 
 test('win rate, expectancy, payoff, and path medians come from the same similar sessions', () => {

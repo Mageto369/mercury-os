@@ -89,6 +89,19 @@ export function sessionRisk(price: number | null, bars: SessionBar[]): SessionRi
   };
 }
 
+/** Advisory stop and target from the median path. Not an order. */
+export function tradePlan(price: number | null, adversePct: number | null, favorablePct: number | null) {
+  const empty = { stop: null as number | null, target: null as number | null, rMultiple: null as number | null };
+  if (price == null || !(price > 0)) return empty;
+  const roundPrice = (value: number) => Number(value.toFixed(value < 1 ? 4 : 2));
+  const stop = adversePct != null && adversePct < 0 ? roundPrice(price * (1 + adversePct / 100)) : null;
+  const target = favorablePct != null && favorablePct > 0 ? roundPrice(price * (1 + favorablePct / 100)) : null;
+  const rMultiple = stop != null && target != null && adversePct != null && favorablePct != null
+    ? round2(favorablePct / Math.abs(adversePct))
+    : null;
+  return { stop, target, rMultiple };
+}
+
 export function pathExcursion(entry: number, futureCloses: number[]) {
   let adverse = 0;
   let favorable = 0;

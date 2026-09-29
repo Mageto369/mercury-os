@@ -188,7 +188,8 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
   });
   const eligible = scored
     .filter((row) => row.eligible)
-    .sort((left, right) => (right.projectedGainPct ?? Number.NEGATIVE_INFINITY) - (left.projectedGainPct ?? Number.NEGATIVE_INFINITY)
+    .sort((left, right) => (right.expectancyPct ?? Number.NEGATIVE_INFINITY) - (left.expectancyPct ?? Number.NEGATIVE_INFINITY)
+      || (right.projectedGainPct ?? Number.NEGATIVE_INFINITY) - (left.projectedGainPct ?? Number.NEGATIVE_INFINITY)
       || right.strength - left.strength
       || left.symbol.localeCompare(right.symbol));
   eligible.forEach((row, index) => {

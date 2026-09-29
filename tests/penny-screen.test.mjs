@@ -29,9 +29,11 @@ test('a price-only auto-buy check still rejects a large cap', () => {
   assert.equal(screenPennyStock({ symbol: 'ALT', price: 2.96 }).pass, true);
 });
 
-test('a new simulated buy requires the rise-with-room rank', () => {
-  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: 3.59, room: true }).pass, true);
-  assert.deepEqual(screenPaperBuy({ symbol: 'AMC', price: 3.29, room: false }).reasons, ['rise is not marked room']);
-  assert.equal(screenPaperBuy({ symbol: 'AA', price: 42.25, room: true }).pass, false);
-  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: null, room: true }).pass, false);
+test('a new simulated buy requires room and a positive expectancy', () => {
+  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: 3.59, room: true, expectancyPct: 0.63 }).pass, true);
+  assert.deepEqual(screenPaperBuy({ symbol: 'AMC', price: 3.29, room: false, expectancyPct: 2 }).reasons, ['rise is not marked room']);
+  assert.deepEqual(screenPaperBuy({ symbol: 'AFCG', price: 3.59, room: true, expectancyPct: -0.4 }).reasons, ['expectancy is not positive']);
+  assert.deepEqual(screenPaperBuy({ symbol: 'AFCG', price: 3.59, room: true, expectancyPct: null }).reasons, ['expectancy is not positive']);
+  assert.equal(screenPaperBuy({ symbol: 'AA', price: 42.25, room: true, expectancyPct: 1 }).pass, false);
+  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: null, room: true, expectancyPct: 1 }).pass, false);
 });

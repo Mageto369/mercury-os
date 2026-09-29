@@ -84,3 +84,19 @@ test('the daily list stops at ten and keeps the highest projected gain first', (
   assert.equal(rank.picks[9].rank, 10);
   assert.ok(rank.picks[0].projectedGainPct >= rank.picks[9].projectedGainPct);
 });
+
+test('expectancy outranks a higher median', () => {
+  const fatTail = setup({ return5Pct: 2, riseScore: 70 });
+  const steady = setup({ return5Pct: 28, riseScore: 60 });
+  const rank = rankDailyConsiderations([
+    { symbol: 'TAIL', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: fatTail },
+    { symbol: 'STEADY', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: steady },
+  ], [
+    ...[12, 12, 12, 12, -2, -2, -2, -40].map((gain, index) => analog(`T${index}`, gain, fatTail, `2026-04-${String(index + 1).padStart(2, '0')}`)),
+    ...cluster('S', 8, 2, steady),
+  ]);
+  assert.deepEqual(rank.picks.map((pick) => pick.symbol), ['STEADY', 'TAIL']);
+  assert.equal(rank.picks[0].expectancyPct, 2);
+  assert.equal(rank.picks[1].projectedGainPct, 5);
+  assert.ok(rank.picks[1].projectedGainPct > rank.picks[0].projectedGainPct);
+});

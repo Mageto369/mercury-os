@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { loadPricePush } from "@/lib/market/attention";
 import { loadDailyHistory } from "@/lib/market/daily-history";
+import { loadPennyExpectancy } from "@/lib/market/expectancy-book";
 import { summarizePriceHistory } from "@/lib/market/nasdaq-history";
 import { applyPricePush, EMPTY_PRICE_PUSH } from "@/lib/market/price-push";
 import { submitPaperOrder } from "@/lib/paper/submit-order";
@@ -132,12 +133,18 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
   }
   const histories = await loadDailyHistory(staged.map((candidate) => candidate.symbol));
   const pushes = await loadPricePush(staged.map((candidate) => candidate.symbol));
+  const expectancy = staged.length ? await loadPennyExpectancy(staged.map((candidate) => candidate.symbol)) : new Map<string, number | null>();
   const buys: PaperEngineCandidate[] = [];
   for (const candidate of staged) {
     const bars = histories.get(candidate.symbol) ?? [];
     const push = pushes.get(candidate.symbol);
     const rise = applyPricePush(summarizePriceHistory(candidate.price, bars).rise, push ?? EMPTY_PRICE_PUSH);
-    if (!screenPaperBuy({ symbol: candidate.symbol, price: candidate.price, room: rise.room }).pass) continue;
+    if (!screenPaperBuy({
+      symbol: candidate.symbol,
+      price: candidate.price,
+      room: rise.room,
+      expectancyPct: expectancy.get(candidate.symbol) ?? null,
+    }).pass) continue;
     buys.push(candidate);
   }
 
@@ -196,7 +203,7 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
       timeInForce: "day",
       idempotencyKey: intent.idempotencyKey,
       thesis: intent.side === "buy"
-        ? "Paper engine bought a penny name marked rise-with-room."
+        ? "Paper engine bought a penny name with room and positive expectancy."
         : "Paper engine translated a shadow exit into a virtual order.",
       riskNotes: "Virtual ledger only. Broker is not connected.",
     });

@@ -88,9 +88,12 @@ async function syncUniverse() {
     total=result.data.total;
     const records=result.data.securities;
     if(!records.length)break;
+    // postgres.js treats a JSON-looking string as json and wraps it again, so
+    // jsonb_to_recordset sees a string instead of an array. Decode text explicitly.
+    const payloadBase64=toJsonbBase64(records);
     const q=await sql`WITH source AS (
       SELECT upper(symbol) AS symbol,name,upper(market) AS market,lpad(cik,10,'0') AS cik
-      FROM jsonb_to_recordset(${toJsonb(records)}::jsonb) AS x(symbol text,name text,market text,cik text)
+      FROM jsonb_to_recordset(convert_from(decode(${payloadBase64},'base64'),'UTF8')::jsonb) AS x(symbol text,name text,market text,cik text)
     )
     INSERT INTO securities(id,symbol,name,market,cik,active)
     SELECT 'sec:'||cik||':'||symbol,symbol,name,market,cik,true FROM source

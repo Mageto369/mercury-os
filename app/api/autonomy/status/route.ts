@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getProviderReadiness } from '@/lib/autonomy/providers';
+import { paperEngineEnabled } from '@/lib/paper/auto-engine';
 import { evaluateAutonomyGuardrails } from '@/lib/risk/autonomy-guardrails';
 import { intelligenceJobs } from '@/lib/workflows/jobs';
 
@@ -14,6 +15,8 @@ export async function GET() {
     ok: true,
     mode: 'shadow',
     capitalExecutionEnabled: false,
+    paperEngineEnabled: paperEngineEnabled() && guardrails.researchExecutionAllowed,
+    brokerConnected: false,
     autonomousResearchEnabled: guardrails.researchExecutionAllowed,
     requiredInfrastructureReady: guardrails.coreInfrastructureReady,
     guardrails,

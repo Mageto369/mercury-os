@@ -4,6 +4,7 @@ import { routeOperationalAlert } from "@/lib/alerts/router";
 import { matureOpportunityOutcomes } from "@/lib/performance/outcomes";
 import { refreshSourceReputation } from "@/lib/research/source-reputation";
 import { buildShadowPortfolio } from "@/lib/portfolio/shadow-portfolio";
+import { runPaperEngine } from "@/lib/paper/auto-engine";
 import { settleRestingOrders } from "@/lib/paper/order-engine";
 import { pullAndPersistMarketData } from "@/lib/providers/market/router";
 import { runOpenDataMesh } from "@/lib/providers/open-data/mesh";
@@ -323,8 +324,24 @@ async function runIntelligenceCycle(force = false) {
         error instanceof Error ? error.message : "shadow_portfolio_failed",
     };
   }
-  // Resting orders are the other half of the paper lifecycle: without this pass
-  // an open limit order can never fill and a day order never expires.
+  let paperEngine:
+    | Awaited<ReturnType<typeof runPaperEngine>>
+    | { ok: false; reason: string };
+  try {
+    const positions =
+      shadowPortfolio &&
+      typeof shadowPortfolio === "object" &&
+      "positions" in shadowPortfolio &&
+      Array.isArray(shadowPortfolio.positions)
+        ? (shadowPortfolio.positions as Array<Record<string, unknown>>)
+        : undefined;
+    paperEngine = await runPaperEngine({ positions });
+  } catch (error) {
+    paperEngine = {
+      ok: false,
+      reason: error instanceof Error ? error.message : "paper_engine_failed",
+    };
+  }
   try {
     restingOrders = await settleRestingOrders(now);
   } catch (error) {
@@ -363,6 +380,7 @@ async function runIntelligenceCycle(force = false) {
     mode: result.mode,
     autonomousExecution: false,
     capitalExecutionEnabled: false,
+    paperEngine,
     supervisor: result.supervisor,
     startedAt: result.startedAt,
     completedAt: result.completedAt,

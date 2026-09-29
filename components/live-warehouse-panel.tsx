@@ -55,6 +55,7 @@ type Health = {
     liveSecurities: number;
     validationSecurities: number;
     liveOpportunities: number;
+    referenceOpportunities?: number;
     matured60mOutcomes: number;
   };
 };
@@ -173,7 +174,8 @@ export function LiveWarehousePanel() {
                   <b>Live evidence</b>
                   <small>
                     {health.warehouse.liveSecurities} securities ·{" "}
-                    {health.warehouse.liveOpportunities} opportunities
+                    {health.warehouse.liveOpportunities} live ·{" "}
+                    {health.warehouse.referenceOpportunities ?? 0} reference
                   </small>
                 </span>
                 <strong>{health.warehouse.matured60mOutcomes}</strong>

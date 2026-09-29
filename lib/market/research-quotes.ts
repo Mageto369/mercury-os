@@ -4,6 +4,31 @@ export const DELAYED_REFERENCE_MODEL = "mercury-delayed-reference-v1";
 export const LIVE_SHADOW_MODEL = "mercury-live-shadow-v1";
 export const REFERENCE_QUOTE_FRESH_HOURS = 36;
 
+export type OpportunityEvidenceScope = "empty" | "live" | "delayed-reference" | "mixed";
+
+export function summarizeOpportunityEvidence(modelVersions: Array<string | null | undefined>) {
+  let referenceCount = 0;
+  let liveCount = 0;
+  for (const version of modelVersions) {
+    if (version === DELAYED_REFERENCE_MODEL) referenceCount += 1;
+    else liveCount += 1;
+  }
+  const evidenceScope: OpportunityEvidenceScope =
+    modelVersions.length === 0
+      ? "empty"
+      : referenceCount === 0
+        ? "live"
+        : liveCount === 0
+          ? "delayed-reference"
+          : "mixed";
+  return {
+    evidenceScope,
+    liveEvidenceOnly: evidenceScope === "live",
+    liveCount,
+    referenceCount,
+  };
+}
+
 export type QuoteEvidenceClass = "live" | "delayed-reference";
 
 export interface ResearchQuote {

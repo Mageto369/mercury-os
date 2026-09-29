@@ -38,11 +38,13 @@ type Opportunity = {
   };
   state?: string;
   observedAt?: string;
+  modelVersion?: string | null;
 };
 
 type DashboardState = {
   opportunities: Opportunity[];
   opportunityMode: string;
+  evidenceScope: string;
   regime: any;
   liquidity: any;
   agents: any;
@@ -52,12 +54,103 @@ type DashboardState = {
 };
 
 const emptyState: DashboardState = {
-  opportunities: [], opportunityMode: 'loading', regime: null, liquidity: null,
+  opportunities: [], opportunityMode: 'loading', evidenceScope: 'loading', regime: null, liquidity: null,
   agents: null, autonomy: null, providers: null, error: null,
 };
 
 const nav = ['Command', 'Market Outlook', 'Discovery', 'Social Radar', 'Opportunities', 'Portfolio', 'Risk', 'Research', 'Models', 'Workflows', 'Audit'] as const;
 type Workspace = typeof nav[number];
+
+type EvidenceBannerScope = 'empty' | 'live' | 'delayed-reference' | 'mixed' | 'sample' | 'loading' | 'unknown';
+
+function evidenceBannerScope(value: string): EvidenceBannerScope {
+  switch (value) {
+    case 'empty':
+    case 'live':
+    case 'delayed-reference':
+    case 'mixed':
+    case 'sample':
+    case 'loading':
+    case 'unknown':
+      return value;
+    default:
+      return 'unknown';
+  }
+}
+
+function evidenceBanner(mode: string, evidenceScope: string) {
+  if (mode === 'sample') return 'Sample mode · database runtime not connected';
+  const scope = evidenceBannerScope(evidenceScope);
+  switch (scope) {
+    case 'live':
+      return 'LIVE EVIDENCE ONLY · warehouse-backed research state';
+    case 'delayed-reference':
+      return 'DELAYED REFERENCE · these rows are research context and are excluded from live proof';
+    case 'mixed':
+      return 'MIXED EVIDENCE · live rows and delayed-reference rows are both in this list';
+    case 'empty':
+      return 'Warehouse connected · no opportunity rows yet';
+    case 'sample':
+      return 'Sample mode · database runtime not connected';
+    case 'loading':
+    case 'unknown':
+      return 'Research and shadow operations';
+    default: {
+      const unexpected: never = scope;
+      return unexpected;
+    }
+  }
+}
+
+function opportunityKpiLabel(evidenceScope: string) {
+  const scope = evidenceBannerScope(evidenceScope);
+  switch (scope) {
+    case 'live':
+      return 'Live Opportunities';
+    case 'delayed-reference':
+      return 'Reference Opportunities';
+    case 'mixed':
+      return 'Ranked Opportunities';
+    case 'empty':
+    case 'sample':
+    case 'loading':
+    case 'unknown':
+      return 'Opportunities';
+    default: {
+      const unexpected: never = scope;
+      return unexpected;
+    }
+  }
+}
+
+function evidenceFootnote(evidenceScope: string) {
+  const scope = evidenceBannerScope(evidenceScope);
+  switch (scope) {
+    case 'live':
+      return 'live warehouse';
+    case 'delayed-reference':
+      return 'not live proof';
+    case 'mixed':
+      return 'mixed evidence';
+    case 'empty':
+    case 'sample':
+    case 'loading':
+    case 'unknown':
+      return 'runtime status';
+    default: {
+      const unexpected: never = scope;
+      return unexpected;
+    }
+  }
+}
+
+function opportunityTableCaption(ranked: Opportunity[]) {
+  const reference = ranked.filter((row) => row.modelVersion === 'mercury-delayed-reference-v1').length;
+  if (ranked.length > 0 && reference === ranked.length) return 'Delayed Nasdaq reference rows. They do not count as live proof.';
+  if (reference > 0) return 'Live and delayed-reference rows. Delayed rows do not count as live proof.';
+  if (ranked.length > 0) return 'Live-only ranked opportunity rows from the warehouse.';
+  return 'No ranked rows yet.';
+}
 
 function n(value: unknown, fallback = 0) {
   const x = Number(value);
@@ -94,6 +187,7 @@ export function CommandCenter() {
       setState({
         opportunities: items,
         opportunityMode: opportunities.body?.mode ?? 'unknown',
+        evidenceScope: opportunities.body?.evidenceScope ?? 'unknown',
         regime: regime.body,
         liquidity: liquidity.body,
         agents: agents.body,
@@ -158,7 +252,7 @@ export function CommandCenter() {
 
     <main className="workspace">
       <header className="command-header">
-        <div><div className="eyebrow">{tab} workspace</div><h1>{tab === 'Command' ? 'Calculated Aggression' : tab}</h1><p>{state.opportunityMode === 'live' ? 'LIVE EVIDENCE ONLY · Supabase-backed research state' : state.opportunityMode === 'sample' ? 'Sample mode · database runtime not connected' : 'Research and shadow operations'}</p></div>
+        <div><div className="eyebrow">{tab} workspace</div><h1>{tab === 'Command' ? 'Calculated Aggression' : tab}</h1><p>{evidenceBanner(state.opportunityMode, state.evidenceScope)}</p></div>
         <div className="header-actions">
           <button className="icon-button" onClick={() => setAlerts(0)} aria-label="Clear alerts"><Bell size={17}/>{alerts > 0 && <span>{alerts}</span>}</button>
           <button className="pulse-button" onClick={runPulse} disabled={running}><RefreshCw size={16} className={running ? 'spin' : ''}/>{running ? 'Scanning' : 'Run Intelligence Pulse'}</button>
@@ -171,12 +265,12 @@ export function CommandCenter() {
         <section className="kpi-strip">
           {[
             ['Market Regime', display(regimeName), regimeName ? 'good' : 'warn'],
-            ['Live Opportunities', String(ranked.length), ranked.length ? 'good' : 'warn'],
+            [opportunityKpiLabel(state.evidenceScope), String(ranked.length), ranked.length ? 'good' : 'warn'],
             ['Alpha Queue', String(alphaQueue), alphaQueue ? 'good' : 'warn'],
             ['Best Asymmetry', display(bestAsymmetry), bestAsymmetry !== null ? 'good' : 'warn'],
             ['Providers Ready', display(providerReady), providerReady ? 'good' : 'warn'],
             ['System Health', display(systemHealth), systemHealth ? 'good' : 'warn'],
-          ].map(([label, value, tone]) => <div className="kpi" key={label}><span>{label}</span><strong className={tone}>{loading ? '…' : value}</strong><small>{state.opportunityMode === 'live' ? 'live warehouse' : 'runtime status'}</small></div>)}
+          ].map(([label, value, tone]) => <div className="kpi" key={label}><span>{label}</span><strong className={tone}>{loading ? '…' : value}</strong><small>{evidenceFootnote(state.evidenceScope)}</small></div>)}
         </section>
 
         <section className="hero-grid">
@@ -185,7 +279,7 @@ export function CommandCenter() {
         </section>
 
         <OpportunityTable ranked={ranked} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort}/>
-        {current ? <OpportunityDetail opportunity={current}/> : <EmptyPanel title="No live opportunities" detail="The dashboard is connected, but no live non-validation opportunity rows are available yet. Run ingestion/intelligence workflows to populate this view."/>}
+        {current ? <OpportunityDetail opportunity={current}/> : <EmptyPanel title="No live opportunities" detail="The dashboard is connected, but no live non-validation opportunity rows are available yet. Delayed reference rows, when present, stay out of live proof."/>}
 
         <section className="triple-grid">
           <StatusPanel title="Agent Health" route="/api/agents/health" refreshToken={refreshToken}/>
@@ -214,7 +308,7 @@ function OpportunityTable({ ranked, selected, setSelected, sort, setSort }: {
   sort: 'asymmetry' | 'alpha' | 'gem' | 'wave'; setSort: (value: 'asymmetry' | 'alpha' | 'gem' | 'wave') => void;
 }) {
   return <section className="surface opportunity-card">
-    <div className="section-head"><div><h2>Opportunity Command</h2><p>Live-only ranked opportunity rows when the database runtime is connected.</p></div><select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="asymmetry">Asymmetry</option><option value="alpha">Alpha</option><option value="gem">Gem</option><option value="wave">Wave</option></select></div>
+    <div className="section-head"><div><h2>Opportunity Command</h2><p>{opportunityTableCaption(ranked)}</p></div><select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="asymmetry">Asymmetry</option><option value="alpha">Alpha</option><option value="gem">Gem</option><option value="wave">Wave</option></select></div>
     {ranked.length === 0 ? <div className="muted2" style={{padding:'18px 0'}}>No live opportunity rows available.</div> : <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Alpha</th><th>Gem</th><th>Wave</th><th>Asym.</th><th>Catalyst</th><th>Social</th><th>Liquidity</th><th>Trap</th><th>Peak</th><th>Aggr.</th><th>Action</th></tr></thead><tbody>{ranked.map(({input,decision}) => <tr key={input.symbol} onClick={() => setSelected(input.symbol)} className={input.symbol === selected ? 'selected-row' : ''}><td><b>{input.symbol}</b><small>{input.market}{input.price != null ? ` · $${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}` : ''}</small></td><td>{decision.alpha}</td><td>{input.gem}</td><td>{input.wave}</td><td><b>{decision.asymmetry}</b></td><td>{input.catalyst}</td><td>{input.social}</td><td>{input.liquidity}</td><td>{input.trapRisk}</td><td>{input.peakRisk}</td><td>{decision.aggression}/5</td><td><span className={`badge ${decision.hardBlocked ? 'danger' : 'good'}`}>{decision.action?.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>}
   </section>;
 }
@@ -222,7 +316,7 @@ function OpportunityTable({ ranked, selected, setSelected, sort, setSort }: {
 function OpportunityDetail({ opportunity }: { opportunity: Opportunity }) {
   const { input, decision } = opportunity;
   return <section className="detail-grid">
-    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">Selected live opportunity</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{input.price == null ? '—' : `$${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}`}</strong><span className="good">Asym {decision.asymmetry}</span></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{value}</b></div>)}</div></div>
+    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{input.price == null ? '—' : `$${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}`}</strong><span className="good">Asym {decision.asymmetry}</span></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{value}</b></div>)}</div></div>
     <div className="surface allocation-card"><h2>Decision Brain</h2><div className="allocation-action"><span>Current shadow action</span><strong>{decision.action?.replaceAll('_',' ')}</strong><p>{decision.reasons?.slice(0,3).join(' · ') || 'No rationale recorded.'}</p></div><div className="allocation-list"><div><span>Aggression</span><b>{decision.aggression}/5</b></div><div><span>Alpha</span><b>{decision.alpha}</b></div><div><span>Hard blocked</span><b>{decision.hardBlocked ? 'YES' : 'NO'}</b></div><div><span>Float</span><b>{input.floatShares == null ? '—' : `${(input.floatShares / 1e6).toFixed(1)}M`}</b></div></div></div>
   </section>;
 }

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSql } from '@/lib/db';
 import { scoreOpportunity } from '@/lib/alpha/scoring';
 import { sampleUniverse } from '@/lib/intelligence/sample-universe';
+import { summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -12,7 +13,13 @@ export async function GET() {
     const opportunities = sampleUniverse
       .map((input) => ({ input, decision: scoreOpportunity(input) }))
       .sort((a, b) => b.decision.asymmetry - a.decision.asymmetry);
-    return NextResponse.json({ generatedAt: new Date().toISOString(), mode: 'sample', liveEvidenceOnly: false, opportunities });
+    return NextResponse.json({
+      generatedAt: new Date().toISOString(),
+      mode: 'sample',
+      evidenceScope: 'sample',
+      liveEvidenceOnly: false,
+      opportunities,
+    });
   }
 
   try {
@@ -85,18 +92,23 @@ export async function GET() {
       modelVersion: row.model_version,
     }));
 
+    const evidence = summarizeOpportunityEvidence(opportunities.map((row) => row.modelVersion));
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
-      mode: 'live',
-      liveEvidenceOnly: true,
+      mode: 'warehouse',
+      evidenceScope: evidence.evidenceScope,
+      liveEvidenceOnly: evidence.liveEvidenceOnly,
+      liveCount: evidence.liveCount,
+      referenceCount: evidence.referenceCount,
       count: opportunities.length,
       opportunities,
     });
   } catch (error) {
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
-      mode: 'live',
-      liveEvidenceOnly: true,
+      mode: 'warehouse',
+      evidenceScope: 'empty',
+      liveEvidenceOnly: false,
       opportunities: [],
       error: 'opportunity_query_failed',
       detail: error instanceof Error ? error.message : 'unknown error',

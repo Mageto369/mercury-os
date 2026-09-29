@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSql } from "@/lib/db";
 import { getDatabaseConfig } from "@/lib/db/config";
+import { DELAYED_REFERENCE_MODEL } from "@/lib/market/research-quotes";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +42,7 @@ export async function GET() {
     liveSecurities: 0,
     validationSecurities: 0,
     liveOpportunities: 0,
+    referenceOpportunities: 0,
     matured60mOutcomes: 0,
     marketSnapshots: 0,
     liveMarketSnapshots: 0,
@@ -91,8 +93,10 @@ export async function GET() {
             count(*) filter (where id like 'validation:%')::int as validation
           from securities
         `,
-        sql<{ count: number }[]>`
-          select count(*)::int as count
+        sql<{ live: number; reference: number }[]>`
+          select
+            count(*) filter (where o.model_version is distinct from ${DELAYED_REFERENCE_MODEL})::int as live,
+            count(*) filter (where o.model_version = ${DELAYED_REFERENCE_MODEL})::int as reference
           from opportunities o
           join securities s on s.id = o.security_id
           where s.id not like 'validation:%'
@@ -100,8 +104,11 @@ export async function GET() {
         sql<{ count: number }[]>`
           select count(*)::int as count
           from opportunity_outcomes oo
+          join opportunities o on o.id = oo.opportunity_id
           join securities s on s.id = oo.security_id
-          where s.id not like 'validation:%' and oo.matured_60m = true
+          where s.id not like 'validation:%'
+            and oo.matured_60m = true
+            and o.model_version is distinct from ${DELAYED_REFERENCE_MODEL}
         `,
         sql<{total: number; live: number; reference: number; securities: number}[]>`
           select count(*)::int as total,
@@ -128,7 +135,8 @@ export async function GET() {
         publicTables: Number(tables[0]?.count ?? 0),
         liveSecurities: Number(securities[0]?.live ?? 0),
         validationSecurities: Number(securities[0]?.validation ?? 0),
-        liveOpportunities: Number(opportunities[0]?.count ?? 0),
+        liveOpportunities: Number(opportunities[0]?.live ?? 0),
+        referenceOpportunities: Number(opportunities[0]?.reference ?? 0),
         matured60mOutcomes: Number(outcomes[0]?.count ?? 0),
         marketSnapshots: Number(snapshots[0]?.total ?? 0),
         liveMarketSnapshots: Number(snapshots[0]?.live ?? 0),

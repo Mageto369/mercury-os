@@ -129,7 +129,7 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
     try {
       const result = await runGemDiscoveryWorkflow();
       const strong = result.candidates.filter((candidate) => candidate.gemScore >= 75).length;
-      return { name: job.name, status: result.universeSize ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: strong, message: `Gem Discovery ranked ${result.candidates.length} candidates from ${result.universeSize} liquid symbols, with ${strong} scoring 75 or higher under market outlook ${result.marketOutlook}.` };
+      return { name: job.name, status: result.universeSize ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: strong, message: `Gem Discovery ranked ${result.candidates.length} candidates from ${result.universeSize} liquid symbols, with ${strong} scoring 75 or higher under market outlook ${result.marketOutlook}. Unobserved catalyst, structure, and attention are omitted.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Gem Discovery', error); }
   }
 

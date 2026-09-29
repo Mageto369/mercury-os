@@ -81,7 +81,7 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
     const trapRisk = clamp((riskFlag?.maxRiskScore ?? 0) * 0.72 + promotionRisk * 0.45);
     const reverseSplitRisk = riskFlag?.reasons.some((reason) => reason.includes('reverse_split')) ? Math.max(60, riskFlag.maxRiskScore) : 0;
     const dilutionRisk = riskFlag ? Math.min(100, riskFlag.maxRiskScore) : 0;
-    const confidence = clamp(55 + (liquiditySignal.rvol !== null ? 10 : 0) + (socialSignal ? 10 : 0) + (candidate.catalystScore !== 50 ? 10 : 0) + (candidate.structureScore >= 80 ? 10 : 0));
+    const confidence = clamp(55 + (liquiditySignal.rvol !== null ? 10 : 0) + (socialSignal ? 10 : 0) + (candidate.catalystScore !== null ? 10 : 0));
     const state = inferState(wave, socialVelocity, crowding);
 
     const input: OpportunityInput = {
@@ -93,7 +93,7 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
       avgDollarVolume20d: 0,
       gem: candidate.gemScore,
       wave,
-      catalyst: candidate.catalystScore,
+      catalyst: candidate.catalystScore ?? 0,
       social: clamp(socialVelocity * 0.7 + (socialSignal?.crossSourceConfirmation ?? 0) * 0.3),
       liquidity: liquiditySignal.liquidityScore,
       marketOutlook: candidate.marketOutlook,

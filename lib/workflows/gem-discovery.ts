@@ -1,6 +1,7 @@
 import { gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { systemEvents } from '@/lib/db/schema';
+import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
@@ -16,9 +17,9 @@ export interface GemCandidate {
   symbol: string;
   gemScore: number;
   liquidityScore: number;
-  catalystScore: number;
-  structureScore: number;
-  attentionGapScore: number;
+  catalystScore: number | null;
+  structureScore: number | null;
+  attentionGapScore: number | null;
   marketOutlook: number;
   socialVelocity: number;
   promotionRisk: number;
@@ -70,33 +71,28 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
   const candidates = liquidity.signals.map((liquiditySignal) => {
     const socialSignal = socialBySymbol.get(liquiditySignal.symbol);
     const riskFlag = riskBySymbol.get(liquiditySignal.symbol);
-    const catalystScore = clamp(catalystBySymbol.get(liquiditySignal.symbol) ?? 50);
-    const structureScore = clamp(100 - (riskFlag?.maxRiskScore ?? 5));
+    const catalystScore = catalystBySymbol.has(liquiditySignal.symbol)
+      ? clamp(catalystBySymbol.get(liquiditySignal.symbol) ?? 0)
+      : null;
+    const structureScore = riskFlag ? clamp(100 - riskFlag.maxRiskScore) : null;
     const socialVelocity = socialSignal?.velocity ?? 0;
     const promotionRisk = socialSignal?.promotionRisk ?? 0;
     const attentionGapScore = socialSignal
       ? clamp(100 - socialVelocity * 0.55 - socialSignal.crowding * 0.35 - promotionRisk * 0.25)
-      : 92;
-
-    const gemScore = clamp(
-      liquiditySignal.liquidityScore * 0.28 +
-      catalystScore * 0.24 +
-      structureScore * 0.24 +
-      attentionGapScore * 0.16 +
-      marketOutlook * 0.08,
-    );
-
-    const reasons: string[] = [];
-    if (liquiditySignal.liquidityScore >= 75) reasons.push('strong tradable liquidity');
-    if (catalystScore >= 68) reasons.push('recent regulatory catalyst support');
-    if (structureScore >= 85) reasons.push('clean structural-risk profile');
-    if (socialSignal && attentionGapScore >= 75) reasons.push('low-crowding attention gap');
-    if (promotionRisk >= 55) reasons.push('promotion pressure reduces quality');
-    if (riskFlag) reasons.push('structural warning present');
+      : null;
+    const scored = scoreGemCandidate({
+      liquidityScore: liquiditySignal.liquidityScore,
+      marketOutlook,
+      catalystScore,
+      structureScore,
+      attentionGapScore,
+      promotionRisk,
+      hasRiskFlag: Boolean(riskFlag),
+    });
 
     return {
       symbol: liquiditySignal.symbol,
-      gemScore,
+      gemScore: scored.gemScore,
       liquidityScore: liquiditySignal.liquidityScore,
       catalystScore,
       structureScore,
@@ -104,7 +100,7 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
       marketOutlook,
       socialVelocity,
       promotionRisk,
-      reasons,
+      reasons: scored.reasons,
     };
   }).sort((a, b) => b.gemScore - a.gemScore).slice(0, 100);
 

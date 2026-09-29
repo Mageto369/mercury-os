@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { eq, inArray } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { marketSnapshots, securities, shareStructures, socialMentions } from '@/lib/db/schema';
+import { partitionValidationSeed } from '@/lib/db/validation-seed-plan';
 
 const validationUniverse = [
   { symbol: 'IOND', name: 'Ion Defense Validation', market: 'OTC' },
@@ -16,7 +17,12 @@ export async function seedValidationUniverse() {
   const db = getDb();
   if (!db) return { ok: false as const, reason: 'database_not_configured' as const };
 
+  const existing = await db.select({ id: securities.id, symbol: securities.symbol }).from(securities).where(inArray(securities.symbol, validationUniverse.map((item) => item.symbol)));
+  const plan = partitionValidationSeed(existing, validationUniverse);
+  const skipped = new Set(plan.skipped);
+
   for (const item of validationUniverse) {
+    if (skipped.has(item.symbol)) continue;
     await db.insert(securities).values({
       id: `validation:${item.symbol}`,
       symbol: item.symbol,
@@ -24,12 +30,12 @@ export async function seedValidationUniverse() {
       market: item.market,
       active: true,
     }).onConflictDoUpdate({
-      target: securities.symbol,
+      target: securities.id,
       set: { name: item.name, market: item.market, active: true, updatedAt: new Date() },
     });
   }
 
-  const securityRows = await db.select().from(securities).where(inArray(securities.symbol, validationUniverse.map((item) => item.symbol)));
+  const securityRows = await db.select().from(securities).where(inArray(securities.id, plan.seed.map((symbol) => `validation:${symbol}`)));
   const bySymbol = new Map(securityRows.map((row) => [row.symbol, row]));
   const now = Date.now();
   let marketInserted = 0;
@@ -132,7 +138,8 @@ export async function seedValidationUniverse() {
     ok: true as const,
     dataset: 'mercury-v1',
     synthetic: true,
-    securities: validationUniverse.length,
+    securities: plan.seed.length,
+    skippedSymbols: plan.skipped,
     marketSnapshots: marketInserted,
     socialSignals: socialInserted,
     shareStructures: structuresInserted,

@@ -16,7 +16,7 @@ import {
   recordIngestionResult,
   type IngestionPolicy,
 } from "@/lib/admin/ingestion-runtime";
-import type { IntelligenceJobName } from "@/lib/workflows/jobs";
+import { jobsDueAt, type IntelligenceJobName } from "@/lib/workflows/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -103,6 +103,24 @@ async function runIntelligenceCycle(force = false) {
   let entityGraph: SafeResult;
   let deepIntelligence: SafeResult;
 
+  const sidecarConfigured = Boolean(
+    process.env.OPEN_INTELLIGENCE_URL ||
+      process.env.SEC_CIK_MAPPER_URL ||
+      process.env.EDGARTOOLS_URL,
+  );
+  let prefetchedUniverse: unknown = null;
+  if (marketPolicy?.due && sidecarConfigured) {
+    try {
+      const prefetch = await runOpenIntelligenceSync({ universeOnly: true });
+      prefetchedUniverse = "universe" in prefetch ? prefetch.universe : prefetch;
+    } catch (error) {
+      prefetchedUniverse = {
+        ok: false,
+        reason: error instanceof Error ? error.message : "universe_prefetch_failed",
+      };
+    }
+  }
+
   if (marketPolicy?.due) {
     try {
       marketRefresh = await pullAndPersistMarketData(marketPolicy.batchSize);
@@ -142,7 +160,13 @@ async function runIntelligenceCycle(force = false) {
     };
   if (openIntelDue) {
     try {
-      openIntelligenceRefresh = await runOpenIntelligenceSync();
+      const refresh = await runOpenIntelligenceSync({
+        skipUniverse: prefetchedUniverse !== null,
+      });
+      openIntelligenceRefresh =
+        prefetchedUniverse !== null
+          ? { ...refresh, universe: prefetchedUniverse }
+          : refresh;
     } catch (error) {
       openIntelligenceRefresh = {
         ok: false,
@@ -153,10 +177,13 @@ async function runIntelligenceCycle(force = false) {
       };
     }
   } else
-    openIntelligenceRefresh = {
-      ok: false,
-      reason: "not_due_or_disabled_by_ingestion_policy",
-    };
+    openIntelligenceRefresh =
+      prefetchedUniverse !== null
+        ? { ok: true, universe: prefetchedUniverse, reason: "universe_prefetch_only" }
+        : {
+            ok: false,
+            reason: "not_due_or_disabled_by_ingestion_policy",
+          };
 
   const jobMap: Partial<Record<keyof typeof ingestion, IntelligenceJobName>> = {
     "social-radar": "social-radar",
@@ -169,7 +196,19 @@ async function runIntelligenceCycle(force = false) {
     .filter(([key]) => ingestion[key]?.due)
     .map(([, job]) => job!)
     .filter(Boolean);
-  const result = await runSupervisor(now, requestedJobs, force ? "manual" : "cron");
+  const scoringJobs: IntelligenceJobName[] = [
+    "liquidity-pulse",
+    "risk-gateway",
+    "market-regime",
+    "gem-discovery",
+  ];
+  const dueScoring = force
+    ? scoringJobs
+    : jobsDueAt(now)
+        .map((job) => job.name)
+        .filter((name) => scoringJobs.includes(name));
+  const fleetJobs = [...new Set<IntelligenceJobName>([...requestedJobs, ...dueScoring])];
+  const result = await runSupervisor(now, fleetJobs, force ? "manual" : "cron");
   const assignment = (job: IntelligenceJobName) =>
     result.assignments.find((item) => item.job === job) ?? {
       status: "skipped",

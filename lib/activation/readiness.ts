@@ -38,7 +38,7 @@ export async function getProductionReadiness() {
       key: 'market', label: 'Live market intelligence', maxScore: 20,
       score: providers.marketData.configured && !dataQuality.staleDomains.includes('market') ? 20 : providers.marketData.configured ? 8 : 0,
       status: providers.marketData.configured && !dataQuality.staleDomains.includes('market') ? 'ready' : providers.marketData.configured ? 'partial' : 'blocked',
-      detail: !providers.marketData.configured ? 'Market provider missing.' : dataQuality.staleDomains.includes('market') ? 'Provider configured but market observations are stale.' : 'Market provider and freshness gate are healthy.',
+      detail: !providers.marketData.configured ? 'Live market provider missing. Delayed Nasdaq reference quotes do not satisfy this gate.' : dataQuality.staleDomains.includes('market') ? 'Provider configured but market observations are stale.' : 'Market provider and freshness gate are healthy.',
     },
     {
       key: 'fleet', label: 'Agent fleet telemetry', maxScore: 20,

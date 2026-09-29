@@ -20,9 +20,9 @@ The application also exposes a protected idempotent bootstrap endpoint at `POST 
 
 1. Create or select the Supabase project.
 2. Apply the migration.
-3. Configure `DATABASE_URL` in the Mercury runtime environment.
-4. Configure `CRON_SECRET`.
-5. Call `POST /api/admin/bootstrap` with the bearer secret as an idempotency verification step.
+3. Configure `DATABASE_URL` in the Mercury runtime environment. A Docker Compose boot uses the bundled Postgres when `DATABASE_URL` is empty.
+4. Set `SEC_USER_AGENT` to a contact string that includes an email address. SEC rejects the built-in agent.
+5. Call `POST /api/admin/bootstrap` as an idempotency verification step. Personal-server routes are open, so keep the host on a private network.
 6. Call `POST /api/admin/seed-validation` to seed the synthetic validation universe.
 7. Call `POST /api/activation/launch` to run the 12-agent shadow proving loop.
 8. Verify `/api/activation/readiness`, `/api/agents/health`, `/api/performance/shadow`, and `/api/activation/promotion`.

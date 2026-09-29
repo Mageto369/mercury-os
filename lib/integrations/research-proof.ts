@@ -92,7 +92,7 @@ export async function runResearchProofCycle() {
       capitalExecutionEnabled: false as const,
     };
   const rows =
-    await sql`SELECT oo.evaluated_at,oo.return_60m FROM opportunity_outcomes oo JOIN opportunities o ON o.id=oo.opportunity_id JOIN securities s ON s.id=o.security_id WHERE oo.matured_60m=true AND oo.return_60m IS NOT NULL AND s.id NOT LIKE 'validation:%' ORDER BY oo.evaluated_at ASC LIMIT 1500`;
+    await sql`SELECT oo.evaluated_at,oo.return_60m FROM opportunity_outcomes oo JOIN opportunities o ON o.id=oo.opportunity_id JOIN securities s ON s.id=o.security_id WHERE oo.matured_60m=true AND oo.return_60m IS NOT NULL AND s.id NOT LIKE 'validation:%' AND o.model_version IS DISTINCT FROM 'mercury-delayed-reference-v1' ORDER BY oo.evaluated_at ASC LIMIT 1500`;
   const minimum = Math.max(
     20,
     Math.min(500, Number(process.env.RESEARCH_PROOF_MIN_OUTCOMES ?? 20)),

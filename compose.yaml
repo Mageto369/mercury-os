@@ -1,17 +1,36 @@
 services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mercury
+      POSTGRES_PASSWORD: mercury
+      POSTGRES_DB: mercury
+    volumes:
+      - mercury-pg:/var/lib/postgresql/data
+      - ./scripts/postgres/init-warehouse.sh:/docker-entrypoint-initdb.d/00-init-warehouse.sh:ro
+      - ./supabase/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mercury -d mercury"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   mercury:
     build: .
     restart: unless-stopped
     env_file: .env
     environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://mercury:mercury@postgres:5432/mercury}
       OPEN_INTELLIGENCE_URL: http://open-intelligence:8000
       RESEARCH_PROOF_URL: http://research-proof:8000
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-}
     ports:
       - "3000:3000"
     depends_on:
-      open-intelligence:
+      postgres:
         condition: service_healthy
-      research-proof:
+      open-intelligence:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)})"]
@@ -23,6 +42,9 @@ services:
     build: services/open-intelligence
     restart: unless-stopped
     env_file: .env
+    environment:
+      SEC_USER_AGENT: ${SEC_USER_AGENT:-}
+      EDGAR_IDENTITY: ${EDGAR_IDENTITY:-${SEC_USER_AGENT:-}}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
       interval: 30s
@@ -49,3 +71,6 @@ services:
       - /bin/sh
       - -c
       - while true; do curl -fsS http://mercury:3000/api/cron/intelligence || true; sleep 60; done
+
+volumes:
+  mercury-pg:

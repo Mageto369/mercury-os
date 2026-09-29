@@ -5,6 +5,7 @@ import { routeOperationalAlert } from '@/lib/alerts/router';
 import { getDb } from '@/lib/db';
 import { decisionLogs, opportunities, securities } from '@/lib/db/schema';
 import type { OpportunityInput, OpportunityState } from '@/lib/domain/types';
+import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL } from '@/lib/market/research-quotes';
 import { runGemDiscoveryWorkflow } from '@/lib/workflows/gem-discovery';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
@@ -107,7 +108,9 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
 
     const decision = scoreOpportunity(input);
     const opportunityId = randomUUID();
-    const modelVersion = 'mercury-live-shadow-v1';
+    const referenceEvidence = liquiditySignal.evidenceClass === 'delayed-reference';
+    const modelVersion = referenceEvidence ? DELAYED_REFERENCE_MODEL : LIVE_SHADOW_MODEL;
+    const reasons = referenceEvidence ? [...decision.reasons, 'delayed-reference evidence'] : decision.reasons;
 
     await db.insert(opportunities).values({
       id: opportunityId,
@@ -126,7 +129,7 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
       aggression: decision.aggression,
       action: decision.action,
       hardBlocked: decision.hardBlocked,
-      reasons: decision.reasons,
+      reasons,
       modelVersion,
       observedAt: new Date(),
     });
@@ -139,7 +142,7 @@ export async function runOpportunityEngineWorkflow(): Promise<OpportunityEngineR
       actor: 'autonomous-opportunity-engine',
       modelVersion,
       inputs: input,
-      rationale: { reasons: decision.reasons, alpha: decision.alpha, asymmetry: decision.asymmetry },
+      rationale: { reasons, alpha: decision.alpha, asymmetry: decision.asymmetry, evidenceClass: liquiditySignal.evidenceClass },
     });
 
     if (input.confidence >= 80 && !decision.hardBlocked) {

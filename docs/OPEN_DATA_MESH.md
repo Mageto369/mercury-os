@@ -46,9 +46,9 @@ Do not enable a provider in production until its terms and commercial-use rights
 ## Operational endpoints
 
 - `GET /api/providers/open-data/status`
-- `POST /api/providers/open-data/pull` protected by `CRON_SECRET`
+- `POST /api/providers/open-data/pull` is open on the personal-server deployment. `CRON_SECRET` is not an access check.
 
-The intelligence cron refreshes market data and the open-data mesh before the Supervisor evaluates the warehouse.
+The intelligence cycle syncs the SEC universe, refreshes market data, then refreshes the open-data mesh before the Supervisor evaluates the warehouse.
 
 ## Provider health
 

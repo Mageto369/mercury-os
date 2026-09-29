@@ -71,13 +71,13 @@ immediate pass across every enabled pipeline.
 
 ```bash
 cp .env.example .env
-# Set DATABASE_URL and any paid provider keys you want to use.
+# Set SEC_USER_AGENT to a contact string that includes an email address.
+# DATABASE_URL is optional here: Compose starts Postgres when it is empty.
 docker compose up --build -d
 ```
 
-Open `http://localhost:3000`. SEC EDGAR and FINRA run without paid keys. The
-repository-identifying SEC user agent works by default and `SEC_USER_AGENT`
-remains available as an override.
+Open `http://localhost:3000`. SEC EDGAR and FINRA run without paid keys once
+`SEC_USER_AGENT` includes a contact email. SEC rejects the built-in agent.
 
 Mercury application routes are open for a personal-server deployment. Keep the
 server on a private network if it should not be reachable by other users.

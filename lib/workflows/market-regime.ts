@@ -1,6 +1,4 @@
-import { gte } from 'drizzle-orm';
-import { getDb } from '@/lib/db';
-import { marketSnapshots } from '@/lib/db/schema';
+import { loadResearchQuotes } from '@/lib/market/research-quotes';
 
 export type DerivedMarketRegime = 'RISK_ON' | 'SELECTIVE' | 'DEFENSIVE';
 
@@ -27,23 +25,15 @@ function clamp(value: number) {
 }
 
 export async function runMarketRegimeWorkflow(): Promise<MarketRegimeResult> {
-  const db = getDb();
-  if (!db) throw new Error('DATABASE_URL is not configured');
-
   const lookbackMinutes = Math.max(5, Math.min(120, Number(process.env.REGIME_LOOKBACK_MINUTES ?? 30)));
-  const cutoff = new Date(Date.now() - lookbackMinutes * 60 * 1000);
-
-  const rows = await db
-    .select({
-      securityId: marketSnapshots.securityId,
-      dollarVolume: marketSnapshots.dollarVolume,
-      spreadBps: marketSnapshots.spreadBps,
-      rvol: marketSnapshots.rvol,
-      floatRotation: marketSnapshots.floatRotation,
-    })
-    .from(marketSnapshots)
-    .where(gte(marketSnapshots.observedAt, cutoff))
-    .limit(5000);
+  const quotes = await loadResearchQuotes(lookbackMinutes);
+  const rows = quotes.map((quote) => ({
+    securityId: quote.securityId,
+    dollarVolume: quote.dollarVolume,
+    spreadBps: quote.spreadBps,
+    rvol: quote.rvol,
+    floatRotation: quote.floatRotation,
+  }));
 
   const symbolsObserved = new Set(rows.map((row) => row.securityId)).size;
   const rvolValues = rows.map((row) => row.rvol === null ? 0 : Number(row.rvol)).filter((value) => value > 0);

@@ -240,13 +240,18 @@ async function syncForm4(limit: number) {
   return {...batch,status:errors.length?'degraded' as const:'success' as const,securities:rows.length,attempted,skipped,circuitOpen:skipped>0,inserted,errors};
 }
 
-export async function runOpenIntelligenceSync() {
+export async function runOpenIntelligenceSync(options?: { universeOnly?: boolean; skipUniverse?: boolean }) {
   const sql=getSql(); if(!sql) return {ok:false as const,reason:'database_not_configured' as const};
   const bootstrap=await bootstrapOpenSourceIntelligence();
   if(!bootstrap.ok) return bootstrap;
   if(!process.env.OPEN_INTELLIGENCE_URL && !process.env.EDGARTOOLS_URL && !process.env.SEC_CIK_MAPPER_URL && !process.env.FINANCE_DATABASE_URL && !process.env.MARKET_CALENDAR_URL && !process.env.FRED_SIDECAR_URL)
     return {ok:false as const,reason:'open_intelligence_sidecar_not_configured' as const};
-  const universe=await safeSync(syncUniverse);
+  const universe = options?.skipUniverse
+    ? { ok: true as const, status: 'skipped' as const, reason: 'already_synced' as const, upserted: 0, total: 0 }
+    : await safeSync(syncUniverse);
+  if (options?.universeOnly) {
+    return { ok: Boolean(universe && typeof universe === 'object' && 'ok' in universe ? universe.ok : false), mode: 'shadow' as const, capitalExecutionEnabled: false as const, universe, completedAt: new Date().toISOString() };
+  }
   const maxSecurities=Math.max(1,Math.min(500,Number(process.env.OPEN_INTELLIGENCE_MAX_SECURITIES ?? 100)));
   const form4Max=Math.max(0,Math.min(100,Number(process.env.EDGAR_FORM4_MAX_COMPANIES ?? 10)));
   const [identities,calendars,macro,form4]=await Promise.all([

@@ -215,6 +215,50 @@ export function parseNasdaqHistoricalBars(body: NasdaqHistoricalBody): NasdaqDai
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
+export interface ForwardAnalog {
+  symbol: string;
+  date: string;
+  return5Pct: number;
+  relativeVolume: number;
+  extension20Pct: number;
+  closeLocationPct: number;
+  room: boolean;
+  riseScore: number;
+  forward5Pct: number;
+}
+
+/** Past sessions that already have a realized 5-session outcome. The latest sessions are excluded. */
+export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], horizon = 5): ForwardAnalog[] {
+  const ordered = [...bars].sort((left, right) => left.date.localeCompare(right.date));
+  const analogs: ForwardAnalog[] = [];
+  for (let index = EXTENSION_SESSIONS - 1; index < ordered.length - horizon; index += 1) {
+    const through = ordered.slice(0, index + 1);
+    const price = through[through.length - 1]?.close ?? null;
+    const summary = summarizePriceHistory(price, through);
+    const forward = percentChange(price, ordered[index + horizon]?.close ?? null);
+    if (
+      summary.return5Pct == null
+      || summary.relativeVolume == null
+      || summary.extension20Pct == null
+      || summary.closeLocationPct == null
+      || summary.rise.score == null
+      || forward == null
+    ) continue;
+    analogs.push({
+      symbol,
+      date: ordered[index]?.date ?? "",
+      return5Pct: summary.return5Pct,
+      relativeVolume: summary.relativeVolume,
+      extension20Pct: summary.extension20Pct,
+      closeLocationPct: summary.closeLocationPct,
+      room: summary.rise.room,
+      riseScore: summary.rise.score,
+      forward5Pct: forward,
+    });
+  }
+  return analogs;
+}
+
 export async function fetchNasdaqHistoricalBars(symbol: string, fromDate: string, toDate: string) {
   const url = new URL(`https://api.nasdaq.com/api/quote/${encodeURIComponent(symbol)}/historical`);
   url.searchParams.set("assetclass", "stocks");

@@ -6,7 +6,8 @@ import { sampleUniverse } from '@/lib/intelligence/sample-universe';
 import { loadDailyHistory } from '@/lib/market/daily-history';
 import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
-import { summarizePriceHistory } from '@/lib/market/nasdaq-history';
+import { rankDailyConsiderations } from '@/lib/market/daily-rank';
+import { collectForwardAnalogs, summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
 import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
 import { PENNY_MAX_PRICE, PENNY_MIN_DOLLAR_VOLUME, screenPennyStock } from '@/lib/workflows/penny-screen';
@@ -271,7 +272,7 @@ export async function GET() {
 
     const symbols = opportunities.map((row) => String(row.input.symbol));
     const [histories, pushes] = await Promise.all([
-      loadDailyHistory(symbols),
+      loadDailyHistory(symbols, 90),
       loadPricePush(symbols),
     ]);
     const withHistory = opportunities.map((opportunity) => {
@@ -285,7 +286,39 @@ export async function GET() {
       };
     });
 
-    const evidence = summarizeOpportunityEvidence(withHistory.map((row) => row.modelVersion));
+    const analogs = symbols.flatMap((symbol) => collectForwardAnalogs(symbol, histories.get(symbol) ?? []));
+    const candidates = withHistory.flatMap((row) => {
+      const history = row.history;
+      if (
+        history.return5Pct == null
+        || history.relativeVolume == null
+        || history.extension20Pct == null
+        || history.closeLocationPct == null
+        || history.rise.score == null
+      ) return [];
+      return [{
+        symbol: String(row.input.symbol).toUpperCase(),
+        asOf: history.sessions[0]?.date ?? '',
+        blocksRoom: Boolean(row.push?.blocksRoom),
+        socialHype: row.push?.socialHype ?? null,
+        setup: {
+          return5Pct: history.return5Pct,
+          relativeVolume: history.relativeVolume,
+          extension20Pct: history.extension20Pct,
+          closeLocationPct: history.closeLocationPct,
+          room: history.rise.room,
+          riseScore: history.rise.score,
+        },
+      }];
+    });
+    const dailyRank = rankDailyConsiderations(candidates, analogs);
+    const projectionBySymbol = new Map(dailyRank.considered.map((row) => [row.symbol, row]));
+    const rankedBook = withHistory.map((row) => ({
+      ...row,
+      projection: projectionBySymbol.get(String(row.input.symbol).toUpperCase()) ?? null,
+    }));
+
+    const evidence = summarizeOpportunityEvidence(rankedBook.map((row) => row.modelVersion));
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
       mode: 'warehouse',
@@ -293,14 +326,19 @@ export async function GET() {
       liveEvidenceOnly: evidence.liveEvidenceOnly,
       liveCount: evidence.liveCount,
       referenceCount: evidence.referenceCount,
-      count: withHistory.length,
+      count: rankedBook.length,
+      dailyRank: {
+        horizonSessions: dailyRank.horizonSessions,
+        model: dailyRank.model,
+        picks: dailyRank.picks,
+      },
       pennyScreen: {
         maxPrice: PENNY_MAX_PRICE,
         minDollarVolume: PENNY_MIN_DOLLAR_VOLUME,
         considered: rows.length,
         admitted: screened.length,
       },
-      opportunities: withHistory,
+      opportunities: rankedBook,
     });
   } catch (error) {
     return NextResponse.json({

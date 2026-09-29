@@ -7,7 +7,7 @@ function isoDay(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export async function loadDailyHistory(symbols: string[]) {
+export async function loadDailyHistory(symbols: string[], limit = 30) {
   const wanted = [...new Set(symbols.map((symbol) => symbol.toUpperCase()))];
   const histories = new Map<string, StoredDailyBar[]>();
   if (!wanted.length) return histories;
@@ -22,11 +22,12 @@ export async function loadDailyHistory(symbols: string[]) {
       and s.id not like 'validation:%'
     order by s.symbol, h.bar_time desc
   `;
+  const keep = Math.max(30, Math.min(120, limit));
   const grouped = new Map<string, StoredDailyBar[]>();
   for (const row of rows) {
     const symbol = String(row.symbol).toUpperCase();
     const bucket = grouped.get(symbol) ?? [];
-    if (bucket.length >= 30) {
+    if (bucket.length >= keep) {
       grouped.set(symbol, bucket);
       continue;
     }

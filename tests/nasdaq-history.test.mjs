@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseNasdaqHistoricalBars, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
+import { collectForwardAnalogs, parseNasdaqHistoricalBars, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
 
 test('nasdaq historical text rows become oldest-first daily bars', () => {
   const bars = parseNasdaqHistoricalBars({
@@ -99,6 +99,22 @@ test('a rise still near the 20-session average outranks a stretched gain', () =>
   assert.ok(room.score > stretched.score);
   assert.ok(stretched.score > below.score);
   assert.deepEqual(missing, { score: null, room: false });
+});
+
+test('a completed session keeps its later 5-session result and the unfinished tail is not an analog', () => {
+  const bars = Array.from({ length: 30 }, (_, index) => ({
+    date: new Date(Date.UTC(2026, 0, 1 + index)).toISOString().slice(0, 10),
+    close: 10,
+    volume: 1000,
+    high: 10.4,
+    low: 9.6,
+  }));
+  const analogs = collectForwardAnalogs('FLAT', bars);
+  assert.ok(analogs.length >= 1);
+  assert.equal(analogs[0].forward5Pct, 0);
+  assert.equal(analogs[0].room, false);
+  assert.equal(analogs.at(-1).date, '2026-01-25');
+  assert.equal(analogs.some((analog) => analog.date === '2026-01-30'), false);
 });
 
 test('an empty history does not invent a change', () => {

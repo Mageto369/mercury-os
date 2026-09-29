@@ -51,6 +51,18 @@ type Opportunity = {
     socialHype: number | null;
     adjustment: number | null;
   };
+  projection?: {
+    rank: number | null;
+    symbol: string;
+    asOf: string;
+    strength: number;
+    room: boolean;
+    projectedGainPct: number | null;
+    projectedLowPct: number | null;
+    projectedHighPct: number | null;
+    analogs: number;
+    eligible: boolean;
+  } | null;
   decision: {
     alpha: number;
     asymmetry: number;
@@ -64,8 +76,17 @@ type Opportunity = {
   modelVersion?: string | null;
 };
 
+type DailyPick = NonNullable<Opportunity['projection']>;
+
+type DailyRank = {
+  horizonSessions: number;
+  model: string;
+  picks: DailyPick[];
+} | null;
+
 type DashboardState = {
   opportunities: Opportunity[];
+  dailyRank: DailyRank;
   opportunityMode: string;
   evidenceScope: string;
   regime: any;
@@ -77,7 +98,7 @@ type DashboardState = {
 };
 
 const emptyState: DashboardState = {
-  opportunities: [], opportunityMode: 'loading', evidenceScope: 'loading', regime: null, liquidity: null,
+  opportunities: [], dailyRank: null, opportunityMode: 'loading', evidenceScope: 'loading', regime: null, liquidity: null,
   agents: null, autonomy: null, providers: null, error: null,
 };
 
@@ -126,7 +147,7 @@ function evidenceBanner(mode: string, evidenceScope: string) {
 }
 
 function opportunityTableCaption(ranked: Opportunity[]) {
-  const screen = 'Penny screen keeps common stock under $5 with at least $100,000 of dollar volume. New simulated buys also require a ROOM rank. News is an SEC filing from the last 14 days. Hype is a Stocktwits snapshot and stays blank until one is stored.';
+  const screen = 'Penny screen keeps common stock under $5 with at least $100,000 of dollar volume. New simulated buys also require a ROOM rank. News is an SEC filing from the last 14 days. Hype is a Stocktwits snapshot and stays blank until one is stored. The daily 10 is a research rank. Projected gain is the median 5-session result of similar past sessions in this book, not a forecast.';
   const reference = ranked.filter((row) => row.modelVersion === 'mercury-delayed-reference-v1').length;
   if (ranked.length > 0 && reference === ranked.length) return `Delayed Nasdaq reference rows. They do not count as live proof. ${screen}`;
   if (reference > 0) return `Live and delayed-reference rows. Delayed rows do not count as live proof. ${screen}`;
@@ -162,8 +183,10 @@ export function CommandCenter() {
       const bodies = await Promise.all(responses.map(async (response) => ({ ok: response.ok, body: await response.json().catch(() => ({})) })));
       const [opportunities, regime, liquidity, agents, autonomy, providers] = bodies;
       const items = Array.isArray(opportunities.body?.opportunities) ? opportunities.body.opportunities : [];
+      const dailyRank = opportunities.body?.dailyRank?.picks ? opportunities.body.dailyRank : null;
       setState({
         opportunities: items,
+        dailyRank,
         opportunityMode: opportunities.body?.mode ?? 'unknown',
         evidenceScope: opportunities.body?.evidenceScope ?? 'unknown',
         regime: regime.body,
@@ -236,15 +259,15 @@ export function CommandCenter() {
 
       {tab === 'Command' && <>
         <CommandDeck ranked={ranked} evidenceScope={state.evidenceScope} regime={state.regime} liquidity={state.liquidity} autonomy={state.autonomy} loading={loading} selected={selected} onSelect={setSelected}/>
-        <OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/>
+        <OpportunityTable ranked={visible} dailyRank={state.dailyRank} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/>
         {current ? <OpportunityDetail opportunity={current}/> : <EmptyPanel title="No live opportunities" detail="The dashboard is connected, but no live non-validation opportunity rows are available yet. Delayed reference rows, when present, stay out of live proof."/>}
         {lastRefresh && <div className="tiny" style={{marginTop:10}}>Last refreshed {new Date(lastRefresh).toLocaleString()}</div>}
       </>}
 
       {tab === 'Market Outlook' && <MarketOutlookBoard refreshToken={refreshToken}/>}
-      {tab === 'Discovery' && <><DiscoveryBoard refreshToken={refreshToken}/><OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/></>}
+      {tab === 'Discovery' && <><DiscoveryBoard refreshToken={refreshToken}/><OpportunityTable ranked={visible} dailyRank={state.dailyRank} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/></>}
       {tab === 'Social Radar' && <SocialRadarBoard refreshToken={refreshToken}/>}
-      {tab === 'Opportunities' && <><OpportunityTable ranked={visible} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/>{current && <OpportunityDetail opportunity={current}/>}</>}
+      {tab === 'Opportunities' && <><OpportunityTable ranked={visible} dailyRank={state.dailyRank} selected={selected} setSelected={setSelected} sort={sort} setSort={setSort} query={query} setQuery={setQuery}/>{current && <OpportunityDetail opportunity={current}/>}</>}
       {tab === 'Portfolio' && <><ShadowPerformance/><PromotionGate/><ShadowBookBoard refreshToken={refreshToken}/></>}
       {tab === 'Risk' && <><KillSwitchBoard refreshToken={refreshToken}/><IntelligenceLab/></>}
       {tab === 'Research' && <><ResearchStatusBoard refreshToken={refreshToken}/><IntelligenceLab/></>}
@@ -293,7 +316,7 @@ function changeClass(value: number | null | undefined) {
   return value < 0 ? 'danger' : 'good';
 }
 
-type OpportunitySort = 'asymmetry' | 'alpha' | 'gem' | 'wave' | 'return5' | 'relativeVolume' | 'range' | 'dollarVolume' | 'extension20' | 'closeLocation' | 'rise' | 'hype';
+type OpportunitySort = 'asymmetry' | 'alpha' | 'gem' | 'wave' | 'return5' | 'relativeVolume' | 'range' | 'dollarVolume' | 'extension20' | 'closeLocation' | 'rise' | 'projectedGain' | 'hype';
 
 function finiteSortValue(value: number | null | undefined) {
   return value != null && Number.isFinite(value) ? value : Number.NEGATIVE_INFINITY;
@@ -322,6 +345,8 @@ function compareOpportunities(left: Opportunity, right: Opportunity, sort: Oppor
     case 'rise':
       return Number(Boolean(right.history?.rise?.room)) - Number(Boolean(left.history?.rise?.room))
         || finiteSortValue(right.history?.rise?.score) - finiteSortValue(left.history?.rise?.score);
+    case 'projectedGain':
+      return finiteSortValue(right.projection?.projectedGainPct) - finiteSortValue(left.projection?.projectedGainPct);
     case 'hype':
       return finiteSortValue(right.push?.socialHype) - finiteSortValue(left.push?.socialHype);
     case 'asymmetry':
@@ -331,6 +356,11 @@ function compareOpportunities(left: Opportunity, right: Opportunity, sort: Oppor
       return unexpected;
     }
   }
+}
+
+function DailyTen({ dailyRank, selected, setSelected }: { dailyRank: DailyRank; selected: string | null; setSelected: (symbol: string) => void }) {
+  const picks = dailyRank?.picks ?? [];
+  return <div className="daily-ten"><div className="section-head"><div><h2>Daily 10</h2><p>Up to 10 strongest setups from the latest stored session, ordered by projected 5-session gain. The gain is the median of similar past sessions in this book, with the band underneath. Research estimate only.</p></div></div>{picks.length === 0 ? <p className="muted2">Not enough similar past sessions to rank a daily ten.</p> : <div className="daily-ten-grid">{picks.map((pick) => <button key={pick.symbol} type="button" className={pick.symbol === selected ? 'selected' : ''} onClick={() => setSelected(pick.symbol)}><span>#{pick.rank}{pick.room ? ' · ROOM' : ''}</span><b>{pick.symbol}</b><strong className={changeClass(pick.projectedGainPct)}>{formatChange(pick.projectedGainPct)}</strong><small>{formatChange(pick.projectedLowPct)} to {formatChange(pick.projectedHighPct)}</small><small>strength {pick.strength} · {pick.analogs} similar</small></button>)}</div>}</div>;
 }
 
 function RiseRoomStrip({ ranked, setSelected }: { ranked: Opportunity[]; setSelected: (symbol: string) => void }) {
@@ -361,17 +391,18 @@ function ScoreCell({ value }: { value: number }) {
   return <div className="cell-meter"><b>{value}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${width}%` }} /></span></div>;
 }
 
-function OpportunityTable({ ranked, selected, setSelected, sort, setSort, query, setQuery }: {
-  ranked: Opportunity[]; selected: string | null; setSelected: (value: string) => void;
+function OpportunityTable({ ranked, dailyRank, selected, setSelected, sort, setSort, query, setQuery }: {
+  ranked: Opportunity[]; dailyRank: DailyRank; selected: string | null; setSelected: (value: string) => void;
   sort: OpportunitySort; setSort: (value: OpportunitySort) => void;
   query: string; setQuery: (value: string) => void;
 }) {
   return <section className="surface opportunity-card">
-    <div className="section-head"><div><h2>Opportunity Command</h2><p>{opportunityTableCaption(ranked)}</p></div><div className="table-tools"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter ticker" aria-label="Filter opportunities"/><select value={sort} onChange={(e) => setSort(e.target.value as OpportunitySort)}><option value="asymmetry">Asymmetry</option><option value="alpha">Alpha</option><option value="gem">Gem</option><option value="wave">Wave</option><option value="return5">5-session</option><option value="relativeVolume">Relative volume</option><option value="range">Range position</option><option value="dollarVolume">Dollar volume</option><option value="extension20">Distance from 20-session average</option><option value="closeLocation">Close in day range</option><option value="rise">Rise with room</option><option value="hype">Social hype</option></select></div></div>
+    <div className="section-head"><div><h2>Opportunity Command</h2><p>{opportunityTableCaption(ranked)}</p></div><div className="table-tools"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter ticker" aria-label="Filter opportunities"/><select value={sort} onChange={(e) => setSort(e.target.value as OpportunitySort)}><option value="asymmetry">Asymmetry</option><option value="alpha">Alpha</option><option value="gem">Gem</option><option value="wave">Wave</option><option value="return5">5-session</option><option value="relativeVolume">Relative volume</option><option value="range">Range position</option><option value="dollarVolume">Dollar volume</option><option value="extension20">Distance from 20-session average</option><option value="closeLocation">Close in day range</option><option value="rise">Rise with room</option><option value="projectedGain">Projected 5-session gain</option><option value="hype">Social hype</option></select></div></div>
+    <DailyTen dailyRank={dailyRank} selected={selected} setSelected={setSelected}/>
     <RiseRoomStrip ranked={ranked} setSelected={setSelected}/>
-    {ranked.length === 0 ? <div className="muted2" style={{padding:'18px 0'}}>No live opportunity rows available.</div> : <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Price</th><th>30d</th><th>5d</th><th>RVol</th><th>Range</th><th>$ Vol</th><th>vs 20d</th><th>Hold</th><th>Rise</th><th>News</th><th>Hype</th><th>Alpha</th><th>Gem</th><th>Wave</th><th>Asym.</th><th>Catalyst</th><th>Social</th><th>Liquidity</th><th>Trap</th><th>Peak</th><th>Aggr.</th><th>Action</th></tr></thead><tbody>{ranked.map((row) => {
+    {ranked.length === 0 ? <div className="muted2" style={{padding:'18px 0'}}>No live opportunity rows available.</div> : <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Price</th><th>30d</th><th>5d</th><th>RVol</th><th>Range</th><th>$ Vol</th><th>vs 20d</th><th>Hold</th><th>Rise</th><th>Proj.</th><th>News</th><th>Hype</th><th>Alpha</th><th>Gem</th><th>Wave</th><th>Asym.</th><th>Catalyst</th><th>Social</th><th>Liquidity</th><th>Trap</th><th>Peak</th><th>Aggr.</th><th>Action</th></tr></thead><tbody>{ranked.map((row) => {
       const { input, decision, history } = row;
-      return <tr key={input.symbol} onClick={() => setSelected(input.symbol)} className={input.symbol === selected ? 'selected-row' : ''}><td><b>{input.symbol}</b><small>{input.market}</small></td><td><b>{formatPrice(input.price)}</b><small className={changeClass(history?.changePct)}>{formatChange(history?.changePct)}</small></td><td><PriceSpark closes={history?.closes ?? []} /></td><td className={changeClass(history?.return5Pct)}>{formatChange(history?.return5Pct)}</td><td>{formatMultiple(history?.relativeVolume)}</td><td>{formatRange(history?.rangePositionPct)}</td><td>{formatDollarVolume(input.avgDollarVolume20d)}</td><td className={changeClass(history?.extension20Pct)}>{formatChange(history?.extension20Pct)}</td><td>{formatRange(history?.closeLocationPct)}</td><td>{history?.rise?.score == null ? '—' : history.rise.score}{history?.rise?.room ? <small className="good"> ROOM</small> : null}</td><td>{row.push?.newsForm ?? '—'}</td><td>{row.push?.socialHype == null ? '—' : row.push.socialHype}</td><td><ScoreCell value={decision.alpha}/></td><td>{input.gem}</td><td>{input.wave}</td><td><ScoreCell value={decision.asymmetry}/></td><td>{formatFactor(input.catalyst)}</td><td>{formatFactor(input.social)}</td><td>{input.liquidity}</td><td>{input.trapRisk}</td><td>{input.peakRisk}</td><td>{decision.aggression}/5</td><td><span className={`badge ${decision.hardBlocked ? 'danger' : 'good'}`}>{decision.action?.replaceAll('_',' ')}</span></td></tr>;
+      return <tr key={input.symbol} onClick={() => setSelected(input.symbol)} className={input.symbol === selected ? 'selected-row' : ''}><td><b>{input.symbol}</b><small>{input.market}</small></td><td><b>{formatPrice(input.price)}</b><small className={changeClass(history?.changePct)}>{formatChange(history?.changePct)}</small></td><td><PriceSpark closes={history?.closes ?? []} /></td><td className={changeClass(history?.return5Pct)}>{formatChange(history?.return5Pct)}</td><td>{formatMultiple(history?.relativeVolume)}</td><td>{formatRange(history?.rangePositionPct)}</td><td>{formatDollarVolume(input.avgDollarVolume20d)}</td><td className={changeClass(history?.extension20Pct)}>{formatChange(history?.extension20Pct)}</td><td>{formatRange(history?.closeLocationPct)}</td><td>{history?.rise?.score == null ? '—' : history.rise.score}{history?.rise?.room ? <small className="good"> ROOM</small> : null}</td><td className={changeClass(row.projection?.projectedGainPct)}>{formatChange(row.projection?.projectedGainPct)}</td><td>{row.push?.newsForm ?? '—'}</td><td>{row.push?.socialHype == null ? '—' : row.push.socialHype}</td><td><ScoreCell value={decision.alpha}/></td><td>{input.gem}</td><td>{input.wave}</td><td><ScoreCell value={decision.asymmetry}/></td><td>{formatFactor(input.catalyst)}</td><td>{formatFactor(input.social)}</td><td>{input.liquidity}</td><td>{input.trapRisk}</td><td>{input.peakRisk}</td><td>{decision.aggression}/5</td><td><span className={`badge ${decision.hardBlocked ? 'danger' : 'good'}`}>{decision.action?.replaceAll('_',' ')}</span></td></tr>;
     })}</tbody></table></div>}
   </section>;
 }
@@ -380,7 +411,7 @@ function OpportunityDetail({ opportunity }: { opportunity: Opportunity }) {
   const { input, decision, history } = opportunity;
   const sessions = history?.sessions ?? [];
   return <section className="detail-grid">
-    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{formatPrice(input.price)}</strong><span className={history?.changePct != null && history.changePct < 0 ? 'danger' : 'good'}>{formatChange(history?.changePct)}</span></div></div><div className="history-strip"><PriceSpark closes={history?.closes ?? []} /><div><span>Prior close</span><b>{formatPrice(history?.previousClose)}</b></div><div><span>5-session</span><b className={changeClass(history?.return5Pct)}>{formatChange(history?.return5Pct)}</b></div><div><span>Rel. volume</span><b>{formatMultiple(history?.relativeVolume)}</b></div><div><span>Range</span><b>{formatRange(history?.rangePositionPct)}</b></div><div><span>Dollar vol</span><b>{formatDollarVolume(input.avgDollarVolume20d)}</b></div><div><span>vs 20d avg</span><b className={changeClass(history?.extension20Pct)}>{formatChange(history?.extension20Pct)}</b></div><div><span>Close in range</span><b>{formatRange(history?.closeLocationPct)}</b></div><div><span>Rise</span><b>{history?.rise?.score == null ? '—' : history.rise.score}</b></div><div><span>Room</span><b className={history?.rise?.room ? 'good' : ''}>{history?.rise?.room ? 'YES' : 'NO'}</b></div><div><span>News</span><b>{opportunity.push?.newsLabel ?? '—'}</b></div><div><span>Hype</span><b>{opportunity.push?.socialHype == null ? '—' : opportunity.push.socialHype}</b></div><div><span>30d high</span><b>{formatPrice(history?.high)}</b></div><div><span>30d low</span><b>{formatPrice(history?.low)}</b></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{formatFactor(typeof value === 'number' ? value : null)}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, n(value)))}%` }} /></span></div>)}</div>{sessions.length ? <table className="command-table history-table"><thead><tr><th>Session</th><th>Close</th><th>Volume</th></tr></thead><tbody>{sessions.map((session) => <tr key={session.date}><td>{session.date}</td><td>{formatPrice(session.close)}</td><td>{session.volume == null ? '—' : session.volume.toLocaleString()}</td></tr>)}</tbody></table> : <p className="muted2">No delayed daily history stored for this name yet.</p>}</div>
+    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{formatPrice(input.price)}</strong><span className={history?.changePct != null && history.changePct < 0 ? 'danger' : 'good'}>{formatChange(history?.changePct)}</span></div></div><div className="history-strip"><PriceSpark closes={history?.closes ?? []} /><div><span>Prior close</span><b>{formatPrice(history?.previousClose)}</b></div><div><span>5-session</span><b className={changeClass(history?.return5Pct)}>{formatChange(history?.return5Pct)}</b></div><div><span>Rel. volume</span><b>{formatMultiple(history?.relativeVolume)}</b></div><div><span>Range</span><b>{formatRange(history?.rangePositionPct)}</b></div><div><span>Dollar vol</span><b>{formatDollarVolume(input.avgDollarVolume20d)}</b></div><div><span>vs 20d avg</span><b className={changeClass(history?.extension20Pct)}>{formatChange(history?.extension20Pct)}</b></div><div><span>Close in range</span><b>{formatRange(history?.closeLocationPct)}</b></div><div><span>Rise</span><b>{history?.rise?.score == null ? '—' : history.rise.score}</b></div><div><span>Room</span><b className={history?.rise?.room ? 'good' : ''}>{history?.rise?.room ? 'YES' : 'NO'}</b></div><div><span>News</span><b>{opportunity.push?.newsLabel ?? '—'}</b></div><div><span>Hype</span><b>{opportunity.push?.socialHype == null ? '—' : opportunity.push.socialHype}</b></div><div><span>Projected 5d</span><b className={changeClass(opportunity.projection?.projectedGainPct)}>{formatChange(opportunity.projection?.projectedGainPct)}</b></div><div><span>Gain band</span><b>{opportunity.projection?.projectedLowPct == null ? '—' : `${formatChange(opportunity.projection.projectedLowPct)} to ${formatChange(opportunity.projection.projectedHighPct)}`}</b></div><div><span>Similar</span><b>{opportunity.projection?.analogs ?? '—'}</b></div><div><span>Strength</span><b>{opportunity.projection ? opportunity.projection.strength : '—'}</b></div><div><span>Daily rank</span><b>{opportunity.projection?.rank != null && opportunity.projection.rank <= 10 && opportunity.projection.eligible ? opportunity.projection.rank : '—'}</b></div><div><span>30d high</span><b>{formatPrice(history?.high)}</b></div><div><span>30d low</span><b>{formatPrice(history?.low)}</b></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{formatFactor(typeof value === 'number' ? value : null)}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, n(value)))}%` }} /></span></div>)}</div>{sessions.length ? <table className="command-table history-table"><thead><tr><th>Session</th><th>Close</th><th>Volume</th></tr></thead><tbody>{sessions.map((session) => <tr key={session.date}><td>{session.date}</td><td>{formatPrice(session.close)}</td><td>{session.volume == null ? '—' : session.volume.toLocaleString()}</td></tr>)}</tbody></table> : <p className="muted2">No delayed daily history stored for this name yet.</p>}</div>
     <div className="surface allocation-card"><h2>Decision Brain</h2><div className="allocation-action"><span>Current shadow action</span><strong>{decision.action?.replaceAll('_',' ')}</strong><p>{decision.reasons?.slice(0,3).join(' · ') || 'No rationale recorded.'}</p></div><div className="allocation-list"><div><span>Aggression</span><b>{decision.aggression}/5</b></div><div><span>Alpha</span><b>{decision.alpha}</b></div><div><span>Hard blocked</span><b>{decision.hardBlocked ? 'YES' : 'NO'}</b></div><div><span>Float</span><b>{input.floatShares == null ? '—' : `${(input.floatShares / 1e6).toFixed(1)}M`}</b></div></div></div>
   </section>;
 }

@@ -17,6 +17,8 @@
  */
 
 export const VALIDATION_ID_PREFIX = 'validation:';
+/** Kept in step with mercury-delayed-reference-v1. A delayed row is not live proof. */
+export const DELAYED_REFERENCE_MODEL_VERSION = 'mercury-delayed-reference-v1';
 
 export type EvidenceScope = 'live' | 'validation' | 'all';
 
@@ -29,6 +31,8 @@ export interface ProvenanceCounts {
   syntheticSurviving: number;
   /** Live rows observed in the rows actually used downstream. */
   liveSurviving: number;
+  /** Delayed-reference rows observed in the rows actually used downstream. */
+  referenceSurviving?: number;
 }
 
 export interface ProvenanceAudit extends ProvenanceCounts {
@@ -63,6 +67,7 @@ export function summarizeProvenance(scope: EvidenceScope, counts: ProvenanceCoun
   const syntheticCandidates = Math.max(0, counts.syntheticCandidates);
   const syntheticSurviving = Math.max(0, counts.syntheticSurviving);
   const liveSurviving = Math.max(0, counts.liveSurviving);
+  const referenceSurviving = Math.max(0, counts.referenceSurviving ?? 0);
   const syntheticExcluded = Math.max(0, syntheticCandidates - syntheticSurviving);
 
   const reasons: string[] = [];
@@ -73,11 +78,14 @@ export function summarizeProvenance(scope: EvidenceScope, counts: ProvenanceCoun
   if (scope === 'all' && syntheticSurviving > 0) {
     reasons.push(`Scope "all" intentionally mixes ${syntheticSurviving} synthetic row(s) with live evidence; this set must not be used as market proof.`);
   }
+  if (scope === 'live' && referenceSurviving > 0) {
+    reasons.push(`${referenceSurviving} delayed-reference row(s) reached a live evidence set and cannot count as live proof.`);
+  }
   if (candidateRows > 0 && liveSurviving === 0 && scope === 'live') {
     reasons.push('No live rows survived the provenance filter, so any statistic derived from this set is empty rather than clean.');
   }
 
-  const provenanceSafe = scope === 'live' ? syntheticSurviving === 0 : true;
+  const provenanceSafe = scope === 'live' ? syntheticSurviving === 0 && referenceSurviving === 0 : true;
   const filteringObserved = syntheticExcluded > 0;
   const vacuous = scope === 'live' && syntheticCandidates === 0;
 
@@ -87,12 +95,13 @@ export function summarizeProvenance(scope: EvidenceScope, counts: ProvenanceCoun
 
   return {
     scope,
-    liveEvidenceOnly: scope === 'live',
+    liveEvidenceOnly: scope === 'live' && referenceSurviving === 0 && syntheticSurviving === 0,
     candidateRows,
     syntheticCandidates,
     syntheticExcluded,
     syntheticSurviving,
     liveSurviving,
+    referenceSurviving,
     provenanceSafe,
     filteringObserved,
     vacuous,
@@ -108,10 +117,13 @@ export function summarizeProvenance(scope: EvidenceScope, counts: ProvenanceCoun
 export function countSurvivors(rows: ReadonlyArray<Record<string, unknown>>) {
   let syntheticSurviving = 0;
   let liveSurviving = 0;
+  let referenceSurviving = 0;
   for (const row of rows) {
     const id = (row.security_id ?? row.securityId) as string | null | undefined;
+    const modelVersion = row.model_version ?? row.modelVersion;
     if (isValidationId(id)) syntheticSurviving += 1;
+    else if (modelVersion === DELAYED_REFERENCE_MODEL_VERSION) referenceSurviving += 1;
     else liveSurviving += 1;
   }
-  return { syntheticSurviving, liveSurviving };
+  return { syntheticSurviving, liveSurviving, referenceSurviving };
 }

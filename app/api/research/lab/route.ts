@@ -58,13 +58,12 @@ export async function GET(request: Request) {
     const [provenanceCensus] =
       await sql`select count(*)::int candidate_rows,count(*) filter(where s.id like 'validation:%')::int synthetic_candidates from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null`;
     const returnsRows =
-      await sql`select oo.return_60m,oo.security_id from opportunity_outcomes oo join securities s on s.id=oo.security_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' order by oo.evaluated_at desc limit 5000`;
+      await sql`select oo.return_60m,oo.security_id,o.model_version from opportunity_outcomes oo join securities s on s.id=oo.security_id join opportunities o on o.id=oo.opportunity_id where oo.matured_60m=true and oo.return_60m is not null and s.id not like 'validation:%' and o.model_version is distinct from 'mercury-delayed-reference-v1' order by oo.evaluated_at desc limit 5000`;
     const survivors = countSurvivors(returnsRows);
     const evidenceProvenance = summarizeProvenance("live", {
       candidateRows: Number(provenanceCensus?.candidate_rows ?? 0),
       syntheticCandidates: Number(provenanceCensus?.synthetic_candidates ?? 0),
-      syntheticSurviving: survivors.syntheticSurviving,
-      liveSurviving: survivors.liveSurviving,
+      ...survivors,
     });
     const returns = returnsRows
       .map((r) => Number(r.return_60m))

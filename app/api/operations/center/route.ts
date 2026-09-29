@@ -35,7 +35,7 @@ export async function GET() {
     // Passing a literal 0 here made provenanceSafe unfalsifiable, which is exactly
     // the failure this panel exists to catch.
     const provenanceSurvivors =
-      await sql`select o.security_id from opportunities o join securities s on s.id=o.security_id where s.id not like 'validation:%'`;
+      await sql`select o.security_id, o.model_version from opportunities o join securities s on s.id=o.security_id where s.id not like 'validation:%' and o.model_version is distinct from 'mercury-delayed-reference-v1'`;
     const events =
       await sql`select id,event_key,category,severity,source,message,observed_at from system_events order by observed_at desc limit 150`;
     const adminAudit =

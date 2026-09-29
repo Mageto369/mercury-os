@@ -1,7 +1,10 @@
 import { runDataQualityAgent } from '@/lib/agents/data-quality';
 import { runGovernanceAgent } from '@/lib/agents/governance';
 import { getLatestAgentHeartbeats } from '@/lib/agents/heartbeat';
+import { agentsById, type AgentId } from '@/lib/agents/registry';
 import { getSql } from '@/lib/db';
+import { agentTelemetryLimitMinutes } from '@/lib/risk/telemetry-window';
+import { intelligenceJobs } from '@/lib/workflows/jobs';
 
 export interface KillSwitchState {
   key: string;
@@ -18,7 +21,12 @@ export async function getKillSwitchNetwork() {
   const failureThreshold = Math.max(1, Number(process.env.AGENT_FAILURE_KILL_THRESHOLD ?? 3));
   const maxShadowDrawdownPct = Math.max(1, Number(process.env.MAX_SHADOW_DRAWDOWN_PCT ?? 12));
   const now = Date.now();
-  const staleAgents = fleet.heartbeats.filter((row) => now - row.observedAt.getTime() > staleMinutes * 60_000);
+  const cadenceByJob = new Map(intelligenceJobs.map((job) => [job.name, job.cadenceMinutes]));
+  const staleAgents = fleet.heartbeats.filter((row) => {
+    const jobs = agentsById[row.agentId as AgentId]?.ownsJobs ?? [];
+    const limit = agentTelemetryLimitMinutes(jobs.map((name) => cadenceByJob.get(name) ?? staleMinutes), staleMinutes);
+    return now - row.observedAt.getTime() > limit * 60_000;
+  });
   const failingAgents = fleet.heartbeats.filter((row) => row.consecutiveFailures >= failureThreshold);
 
   let unresolvedCriticalIncidents = 0;
@@ -60,7 +68,7 @@ export async function getKillSwitchNetwork() {
     {
       key: 'fleet-stale', label: 'Agent telemetry stale', severity: 'warning',
       tripped: fleet.persistent && staleAgents.length > 0,
-      detail: fleet.persistent ? `${staleAgents.length} agent heartbeats exceed ${staleMinutes} minutes.` : 'Heartbeat persistence is not active.',
+      detail: fleet.persistent ? `${staleAgents.length} agent heartbeats are older than their telemetry window.` : 'Heartbeat persistence is not active.',
     },
     {
       key: 'fleet-failures', label: 'Repeated agent failures', severity: 'critical',

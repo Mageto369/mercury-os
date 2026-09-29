@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 
 /** Prefer a point-in-time common-share count over issued shares, then authorized. */
@@ -17,7 +18,8 @@ export function outstandingConceptRank(concept: string) {
 export async function syncShareStructureFromCompanyFacts() {
   const sql = getSql();
   if (!sql) return { ok: false as const, reason: "database_not_configured" as const, upserted: 0 };
-  const rows = await sql<{ id: string }[]>`
+  const rows = await sql.begin(async (tx) => {
+  const upserted = await tx<{ id: string }[]>`
     WITH preferred AS (
       SELECT DISTINCT ON (security_id, coalesce(period_end, filed_at::date))
         security_id,
@@ -67,5 +69,23 @@ export async function syncShareStructureFromCompanyFacts() {
       source = EXCLUDED.source
     RETURNING id
   `;
+  if (upserted.length > 0) {
+    const ingestId = randomUUID();
+    await tx`
+      INSERT INTO system_events (id, event_key, category, severity, source, message, payload, observed_at)
+      VALUES (
+        ${`structure-ingest:${ingestId}`},
+        ${`structure:ingest:${ingestId}`},
+        'structure:ingest',
+        'info',
+        'sec-companyfacts',
+        ${`Share structure sync upserted ${upserted.length} company-fact rows.`},
+        ${JSON.stringify({ upserted: upserted.length, verified: false })}::jsonb,
+        now()
+      )
+    `;
+  }
+  return upserted;
+  });
   return { ok: true as const, source: "sec-companyfacts" as const, upserted: rows.length, verified: false as const };
 }

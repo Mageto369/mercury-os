@@ -1,3 +1,4 @@
+import { classifyDomainFreshness, usableTimestamp } from '@/lib/agents/freshness';
 import { getDb, getSql } from '@/lib/db';
 
 export interface DataQualityResult {
@@ -38,7 +39,12 @@ export async function runDataQualityAgent(): Promise<DataQualityResult> {
       FROM market_snapshots
     `,
     sql<{ count: number; observed_at: Date | null }[]>`SELECT count(*)::int AS count, max(observed_at) AS observed_at FROM social_mentions`,
-    sql<{ count: number; observed_at: Date | null }[]>`SELECT count(*)::int AS count, max(observed_at) AS observed_at FROM share_structures`,
+    sql<{ count: number; observed_at: Date | null; ingested_at: Date | null }[]>`
+      SELECT
+        (SELECT count(*)::int FROM share_structures) AS count,
+        (SELECT max(observed_at) FROM share_structures WHERE observed_at <= now()) AS observed_at,
+        (SELECT max(observed_at) FROM system_events WHERE category = 'structure:ingest' AND observed_at <= now()) AS ingested_at
+    `,
     sql<{ count: number; filed_at: Date | null; ingested_at: Date | null }[]>`
       SELECT
         (SELECT count(*)::int FROM filings) AS count,
@@ -56,27 +62,40 @@ export async function runDataQualityAgent(): Promise<DataQualityResult> {
 
   const staleDomains: string[] = [];
   const absentDomains: string[] = [];
-  const liveAt = marketFreshness[0]?.live_at ? new Date(marketFreshness[0].live_at) : null;
-  const referenceAt = marketFreshness[0]?.reference_at ? new Date(marketFreshness[0].reference_at) : null;
+  const liveAt = usableTimestamp(marketFreshness[0]?.live_at, now);
+  const referenceAt = usableTimestamp(marketFreshness[0]?.reference_at, now);
   const liveFresh = Boolean(liveAt && now - liveAt.getTime() <= marketMaxMinutes * 60_000);
   const referenceFresh = Boolean(referenceAt && now - referenceAt.getTime() <= referenceMaxMinutes * 60_000);
   const marketAt = liveFresh ? liveAt : referenceFresh ? referenceAt : liveAt ?? referenceAt;
   const socialCount = Number(socialRows[0]?.count ?? 0);
-  const socialAt = socialRows[0]?.observed_at ? new Date(socialRows[0].observed_at) : null;
-  const structureCount = Number(structureRows[0]?.count ?? 0);
-  const structureAt = structureRows[0]?.observed_at ? new Date(structureRows[0].observed_at) : null;
-  const filingCount = Number(filingRows[0]?.count ?? 0);
-  const filingFiledAt = filingRows[0]?.filed_at ? new Date(filingRows[0].filed_at) : null;
-  const filingIngestedAt = filingRows[0]?.ingested_at ? new Date(filingRows[0].ingested_at) : null;
-  const filingClock = filingIngestedAt ?? filingFiledAt;
+  const social = classifyDomainFreshness({
+    count: socialCount,
+    observedAt: socialRows[0]?.observed_at,
+    now,
+    maxAgeMs: socialMaxMinutes * 60_000,
+  });
+  const structure = classifyDomainFreshness({
+    count: Number(structureRows[0]?.count ?? 0),
+    observedAt: structureRows[0]?.observed_at,
+    ingestedAt: structureRows[0]?.ingested_at,
+    now,
+    maxAgeMs: structureMaxHours * 3_600_000,
+  });
+  const filings = classifyDomainFreshness({
+    count: Number(filingRows[0]?.count ?? 0),
+    observedAt: filingRows[0]?.filed_at,
+    ingestedAt: filingRows[0]?.ingested_at,
+    now,
+    maxAgeMs: filingMaxHours * 3_600_000,
+  });
 
   if (!liveFresh && !referenceFresh) staleDomains.push('market');
-  if (socialCount === 0) absentDomains.push('social');
-  else if (!socialAt || now - socialAt.getTime() > socialMaxMinutes * 60_000) staleDomains.push('social');
-  if (structureCount === 0) absentDomains.push('structure');
-  else if (structureAt && structureAt.getTime() <= now && now - structureAt.getTime() > structureMaxHours * 3_600_000) staleDomains.push('structure');
-  if (filingCount === 0 && !filingIngestedAt) absentDomains.push('filings');
-  else if (!filingClock || now - filingClock.getTime() > filingMaxHours * 3_600_000) staleDomains.push('filings');
+  if (social.status === 'absent') absentDomains.push('social');
+  else if (social.status === 'stale') staleDomains.push('social');
+  if (structure.status === 'absent') absentDomains.push('structure');
+  else if (structure.status === 'stale') staleDomains.push('structure');
+  if (filings.status === 'absent') absentDomains.push('filings');
+  else if (filings.status === 'stale') staleDomains.push('filings');
 
   return {
     status: staleDomains.length ? 'degraded' : 'healthy',
@@ -86,9 +105,11 @@ export async function runDataQualityAgent(): Promise<DataQualityResult> {
     detail: {
       market: marketAt?.toISOString() ?? null,
       marketEvidence: liveFresh ? 'live' : referenceFresh ? 'delayed-reference' : null,
-      social: socialCount === 0 ? 'absent' : socialAt?.toISOString() ?? null,
-      structure: structureAt?.toISOString() ?? null,
-      filings: filingClock?.toISOString() ?? null,
+      social: social.status === 'absent' ? 'absent' : social.clock?.toISOString() ?? null,
+      structure: structure.clock?.toISOString() ?? null,
+      structureClock: structure.clockSource,
+      filings: filings.clock?.toISOString() ?? null,
+      filingsClock: filings.clockSource,
     },
   };
 }

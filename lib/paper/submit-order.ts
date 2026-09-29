@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { getSql } from "@/lib/db";
 import { toJsonb } from "@/lib/db/json";
+import { executionQuoteAssumptions } from "@/lib/execution/quote-assumptions";
 import {
   clampSimulatedFillPrice,
   simulateExecution,
@@ -112,15 +113,16 @@ export async function submitPaperOrder(request: PaperOrderRequest): Promise<Pape
     const referencePrice = Number.isFinite(sidePrice) && sidePrice > 0 ? sidePrice : mark;
     const requestedPrice = input.orderType === "limit" ? Number(input.limitPrice) : referencePrice;
     const notional = input.quantity * referencePrice;
+    const assumptions = executionQuoteAssumptions(snapshot);
     const executionEstimate = simulateExecution({
       notional,
       price: referencePrice,
       dollarVolume: Number(snapshot.dollar_volume ?? 0),
-      spreadBps: Number(snapshot.spread_bps ?? 0),
-      rvol: Number(snapshot.rvol ?? 1),
-      floatRotation: Number(snapshot.float_rotation ?? 0),
+      spreadBps: assumptions.spreadBps,
+      rvol: assumptions.rvol,
+      floatRotation: assumptions.floatRotation,
     });
-    const simulation = { ...executionEstimate, quote: quote.decision, requestedPricingMode: input.pricingMode, pricingMode: quote.decision.pricingMode };
+    const simulation = { ...executionEstimate, assumptions, quote: quote.decision, requestedPricingMode: input.pricingMode, pricingMode: quote.decision.pricingMode };
     const slip = simulation.estimatedOneWayCostBps / 10_000;
     const slippedPrice = input.side === "buy" ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
     const fillPrice = clampSimulatedFillPrice(input.orderType, input.side, slippedPrice, requestedPrice);

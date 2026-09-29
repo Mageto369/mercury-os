@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSql } from "@/lib/db";
+import { executionQuoteAssumptions } from "@/lib/execution/quote-assumptions";
 import { getPaperAccountSnapshot } from "@/lib/paper/account";
 import {
   buildRiskSizing,
@@ -160,14 +161,15 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     const dd = await currentDrawdownPct(sql);
+    const assumptions = executionQuoteAssumptions(snapshot);
     const sizing = buildRiskSizing({
       equity: account.equity,
       cash: account.cash,
       price: Number(snapshot.price),
       dollarVolume: Number(snapshot.dollar_volume ?? 0),
-      spreadBps: Number(snapshot.spread_bps ?? 0),
-      rvol: Number(snapshot.rvol ?? 1),
-      floatRotation: Number(snapshot.float_rotation ?? 0),
+      spreadBps: assumptions.spreadBps,
+      rvol: assumptions.rvol,
+      floatRotation: assumptions.floatRotation,
       conviction: parsed.data.conviction,
       currentDrawdownPct: dd,
     });
@@ -176,6 +178,7 @@ export async function POST(request: Request) {
       symbol: security.symbol,
       currentDrawdownPct: dd,
       sizing,
+      assumptions,
       capitalExecutionEnabled: false,
       brokerConnected: false,
     });

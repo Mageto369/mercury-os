@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
 import { getSql } from '@/lib/db';
+import { executionQuoteAssumptions } from '@/lib/execution/quote-assumptions';
 import { clampSimulatedFillPrice, simulateExecution } from '@/lib/execution/simulator';
 import { DEFAULT_PAPER_ACCOUNT_ID } from '@/lib/paper/account';
 import { toJsonb } from '@/lib/db/json';
@@ -199,7 +200,8 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
         }
 
         const notional = remaining * referencePrice;
-        const simulation = simulateExecution({ notional, price: referencePrice, dollarVolume: Number(snapshot.dollar_volume ?? 0), spreadBps: Number(snapshot.spread_bps ?? 0), rvol: Number(snapshot.rvol ?? 1), floatRotation: Number(snapshot.float_rotation ?? 0) });
+        const assumptions = executionQuoteAssumptions(snapshot);
+        const simulation = simulateExecution({ notional, price: referencePrice, dollarVolume: Number(snapshot.dollar_volume ?? 0), spreadBps: assumptions.spreadBps, rvol: assumptions.rvol, floatRotation: assumptions.floatRotation });
         const slip = simulation.estimatedOneWayCostBps / 10_000;
         const slipped = side === 'buy' ? referencePrice * (1 + slip) : referencePrice * (1 - slip);
         const fillPrice = clampSimulatedFillPrice(limitPrice == null ? 'market' : 'limit', side, slipped, limitPrice ?? referencePrice);
@@ -237,7 +239,7 @@ export async function settleRestingOrders(now: Date = new Date(), limit = 500): 
         await tx`
           update paper_orders set status='filled', filled_qty=requested_qty, average_fill_price=${fillPrice},
             fee_amount=${feeAmount}, slippage_bps=${simulation.estimatedOneWayCostBps},
-            simulation=${toJsonb({ ...simulation, quote: quote.decision, requestedPricingMode: pricingMode, pricingMode: quote.decision.pricingMode, referencePrice, fillPrice, commissionBps, settledBy: 'resting-order-engine', capitalExecutionEnabled: false, brokerConnected: false })}::jsonb,
+            simulation=${toJsonb({ ...simulation, assumptions, quote: quote.decision, requestedPricingMode: pricingMode, pricingMode: quote.decision.pricingMode, referencePrice, fillPrice, commissionBps, settledBy: 'resting-order-engine', capitalExecutionEnabled: false, brokerConnected: false })}::jsonb,
             updated_at=now()
           where id=${orderId}
         `;

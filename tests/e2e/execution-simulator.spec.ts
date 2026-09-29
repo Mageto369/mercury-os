@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 import {
+  ASSUMED_RVOL,
+  ASSUMED_SPREAD_BPS,
+  executionQuoteAssumptions,
+} from '../../lib/execution/quote-assumptions';
+import {
   clampSimulatedFillPrice,
   simulateExecution,
 } from '../../lib/execution/simulator';
@@ -52,6 +57,16 @@ test('zero-notional execution has zero participation and remains fill-capable', 
   expect(result.capacityExceeded).toBe(false);
   expect(result.estimatedCapacityNotional).toBeGreaterThan(0);
   expect(result.estimatedFillProbabilityPct).toBeGreaterThan(0);
+});
+
+test('a quote with no spread is not simulated as a locked market', () => {
+  const assumptions = executionQuoteAssumptions({ spread_bps: null, rvol: null, float_rotation: null });
+  expect(assumptions.spreadBps).toBe(ASSUMED_SPREAD_BPS);
+  expect(assumptions.rvol).toBe(ASSUMED_RVOL);
+  expect(assumptions.spreadSource).toBe('assumed');
+  const quoted = simulateExecution({ notional: 10_000, price: 50, dollarVolume: 1_000_000, spreadBps: 0, rvol: 1, floatRotation: 0 });
+  const assumed = simulateExecution({ notional: 10_000, price: 50, dollarVolume: 1_000_000, spreadBps: assumptions.spreadBps, rvol: assumptions.rvol, floatRotation: assumptions.floatRotation });
+  expect(assumed.estimatedOneWayCostBps).toBeGreaterThan(quoted.estimatedOneWayCostBps);
 });
 
 test('capacity tightens as volatility rises', () => {

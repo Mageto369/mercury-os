@@ -26,7 +26,7 @@ const followThrough = setup({ return5Pct: 2, riseScore: 62 });
 const roomName = setup({ return5Pct: 22, extension20Pct: 4, closeLocationPct: 88, room: true, riseScore: 78 });
 const stretched = setup({ return5Pct: 40, relativeVolume: 2.4, extension20Pct: 24, closeLocationPct: 80, riseScore: 90 });
 
-test('a better projected gain ranks above a louder stretched setup', () => {
+test('a positive average stays on the list and a losing average does not', () => {
   const rank = rankDailyConsiderations([
     { symbol: 'FOLLOW', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: followThrough },
     { symbol: 'ROOM', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: roomName },
@@ -39,16 +39,19 @@ test('a better projected gain ranks above a louder stretched setup', () => {
     ...cluster('L', 8, -4, stretched),
     ...cluster('W', 8, 10, setup({ return5Pct: 30, riseScore: 20 })),
   ]);
-  assert.deepEqual(rank.picks.map((pick) => pick.symbol), ['FOLLOW', 'ROOM', 'LOUD']);
+  assert.deepEqual(rank.picks.map((pick) => pick.symbol), ['FOLLOW']);
   assert.equal(rank.picks[0].projectedGainPct, 3);
   assert.equal(rank.picks[0].winRatePct, 100);
   assert.equal(rank.picks[0].expectancyPct, 3);
   assert.equal(rank.picks[0].payoff, null);
+  assert.equal(rank.picks[0].edge, null);
   assert.equal(rank.picks[0].rank, 1);
-  assert.equal(rank.picks[1].room, true);
-  assert.equal(rank.picks[1].projectedGainPct, -1);
-  assert.ok(rank.picks[0].projectedGainPct > rank.picks[2].projectedGainPct);
-  assert.equal(rank.picks.some((pick) => pick.symbol === 'WEAK' || pick.symbol === 'OFFER'), false);
+  const room = rank.considered.find((row) => row.symbol === 'ROOM');
+  assert.equal(room.room, true);
+  assert.equal(room.expectancyPct, -1);
+  assert.equal(room.eligible, false);
+  assert.equal(rank.considered.find((row) => row.symbol === 'LOUD').eligible, false);
+  assert.equal(rank.picks.some((pick) => pick.symbol === 'WEAK' || pick.symbol === 'OFFER' || pick.symbol === 'ROOM'), false);
   assert.equal(rank.considered.find((row) => row.symbol === 'OFFER').eligible, false);
 });
 
@@ -99,4 +102,28 @@ test('expectancy outranks a higher median', () => {
   assert.equal(rank.picks[0].expectancyPct, 2);
   assert.equal(rank.picks[1].projectedGainPct, 5);
   assert.ok(rank.picks[1].projectedGainPct > rank.picks[0].projectedGainPct);
+});
+
+test('a losing average stays off the list and a tighter adverse path wins an expectancy tie', () => {
+  const tight = setup({ return5Pct: 2, riseScore: 62 });
+  const wide = setup({ return5Pct: 18, riseScore: 62 });
+  const flat = setup({ return5Pct: 40, riseScore: 62 });
+  const rank = rankDailyConsiderations([
+    { symbol: 'WIDE', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: wide },
+    { symbol: 'TIGHT', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: tight },
+    { symbol: 'FLAT', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: flat },
+  ], [
+    ...Array.from({ length: 8 }, (_, index) => ({ ...analog(`T${index}`, 2, tight, `2026-03-${String(index + 1).padStart(2, '0')}`), adversePct: -1, favorablePct: 3 })),
+    ...Array.from({ length: 8 }, (_, index) => ({ ...analog(`W${index}`, 2, wide, `2026-02-${String(index + 1).padStart(2, '0')}`), adversePct: -4, favorablePct: 3 })),
+    ...cluster('Z', 8, 0, flat),
+  ]);
+  assert.equal(rank.model, 'mercury-analog-rank-v3');
+  assert.deepEqual(rank.picks.map((pick) => pick.symbol), ['TIGHT', 'WIDE']);
+  assert.equal(rank.picks[0].expectancyPct, 2);
+  assert.equal(rank.picks[0].edge, 2);
+  assert.equal(rank.picks[1].edge, 0.5);
+  const loser = rank.considered.find((row) => row.symbol === 'FLAT');
+  assert.equal(loser.expectancyPct, 0);
+  assert.equal(loser.eligible, false);
+  assert.equal(loser.edge, null);
 });

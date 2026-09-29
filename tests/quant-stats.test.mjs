@@ -64,11 +64,12 @@ test('win rate, expectancy, payoff, and path medians come from the same similar 
     { symbol: 'MIX', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: features },
   ], analogs);
   const pick = rank.picks[0];
-  assert.equal(rank.model, 'mercury-analog-rank-v2');
+  assert.equal(rank.model, 'mercury-analog-rank-v3');
   assert.equal(pick.winRatePct, 87.5);
   assert.equal(pick.expectancyPct, 5.5);
   assert.equal(pick.payoff, 3.29);
   assert.equal(pick.adversePct, -2);
   assert.equal(pick.favorablePct, 6);
   assert.equal(pick.targetFirstPct, 75);
+  assert.equal(pick.edge, 2.75);
 });

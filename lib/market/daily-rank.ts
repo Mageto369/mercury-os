@@ -39,13 +39,14 @@ export interface DailyConsideration {
   adversePct: number | null;
   favorablePct: number | null;
   targetFirstPct: number | null;
+  edge: number | null;
   analogs: number;
   eligible: boolean;
 }
 
 export interface DailyRank {
   horizonSessions: 5;
-  model: "mercury-analog-rank-v2";
+  model: "mercury-analog-rank-v3";
   picks: DailyConsideration[];
   considered: DailyConsideration[];
 }
@@ -111,6 +112,13 @@ function targetFirstRate(flags: Array<boolean | null | undefined>) {
   return round2((hits / marked.length) * 100);
 }
 
+/** Average result divided by the typical adverse path. Null when that path did not go against the entry. */
+function edgeRatio(expectancyPct: number | null, adversePct: number | null) {
+  if (expectancyPct == null || adversePct == null) return null;
+  if (!Number.isFinite(expectancyPct) || !Number.isFinite(adversePct) || !(adversePct < 0)) return null;
+  return round2(expectancyPct / Math.abs(adversePct));
+}
+
 function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
   const nearest = analogs
     .filter((analog) => !(analog.symbol === candidate.symbol && analog.date === candidate.asOf))
@@ -144,6 +152,7 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
       adversePct: null,
       favorablePct: null,
       targetFirstPct: null,
+      edge: null,
       analogs: chosen.length,
     };
   }
@@ -154,16 +163,19 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
   const losses = gains.filter((gain) => gain < 0);
   const averageWin = wins.length ? wins.reduce((sum, gain) => sum + gain, 0) / wins.length : null;
   const averageLoss = losses.length ? Math.abs(losses.reduce((sum, gain) => sum + gain, 0) / losses.length) : null;
+  const expectancyPct = round2(gains.reduce((sum, gain) => sum + gain, 0) / gains.length);
+  const adversePct = adverse.length ? median(adverse) : null;
   return {
     projectedGainPct: median(gains),
     projectedLowPct: percentile(gains, 0.25),
     projectedHighPct: percentile(gains, 0.75),
     winRatePct: round2((wins.length / gains.length) * 100),
-    expectancyPct: round2(gains.reduce((sum, gain) => sum + gain, 0) / gains.length),
+    expectancyPct,
     payoff: averageWin != null && averageLoss != null && averageLoss > 0 ? round2(averageWin / averageLoss) : null,
-    adversePct: adverse.length ? median(adverse) : null,
+    adversePct,
     favorablePct: favorable.length ? median(favorable) : null,
     targetFirstPct: targetFirstRate(chosen.map((analog) => analog.targetFirst)),
+    edge: edgeRatio(expectancyPct, adversePct),
     analogs: gains.length,
   };
 }
@@ -173,7 +185,7 @@ function finiteSetup(setup: SetupFeatures) {
     .every((value) => Number.isFinite(value));
 }
 
-/** Rank the strongest names to consider. Projected gain is the median 5-session result of similar past sessions. */
+/** Rank names to consider. A name stays off the list unless similar past sessions finished with a positive average. */
 export function rankDailyConsiderations(candidates: RankCandidate[], analogs: AnalogObservation[], limit = 10): DailyRank {
   const cap = Math.max(1, Math.min(10, limit));
   const scored = candidates.filter((candidate) => finiteSetup(candidate.setup)).map((candidate) => {
@@ -193,15 +205,19 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
       adversePct: projection.adversePct,
       favorablePct: projection.favorablePct,
       targetFirstPct: projection.targetFirstPct,
+      edge: projection.edge,
       analogs: projection.analogs,
       eligible: !candidate.blocksRoom
         && projection.projectedGainPct != null
+        && projection.expectancyPct != null
+        && projection.expectancyPct > 0
         && (candidate.setup.riseScore >= STRENGTH_FLOOR || candidate.setup.room),
     };
   });
   const eligible = scored
     .filter((row) => row.eligible)
     .sort((left, right) => (right.expectancyPct ?? Number.NEGATIVE_INFINITY) - (left.expectancyPct ?? Number.NEGATIVE_INFINITY)
+      || (right.edge ?? Number.NEGATIVE_INFINITY) - (left.edge ?? Number.NEGATIVE_INFINITY)
       || (right.projectedGainPct ?? Number.NEGATIVE_INFINITY) - (left.projectedGainPct ?? Number.NEGATIVE_INFINITY)
       || right.strength - left.strength
       || left.symbol.localeCompare(right.symbol));
@@ -210,7 +226,7 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
   });
   return {
     horizonSessions: 5,
-    model: "mercury-analog-rank-v2",
+    model: "mercury-analog-rank-v3",
     considered: scored,
     picks: eligible.slice(0, cap),
   };

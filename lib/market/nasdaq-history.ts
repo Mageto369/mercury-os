@@ -227,6 +227,38 @@ export interface ForwardAnalog {
   forward5Pct: number;
   adversePct: number;
   favorablePct: number;
+  targetFirst: boolean | null;
+}
+
+/** Worst and best close after entry, and whether the best close printed first. */
+export function pathMarks(entry: number, futureCloses: number[]) {
+  let adverse = 0;
+  let favorable = 0;
+  let adverseAt = -1;
+  let favorableAt = -1;
+  if (entry > 0) {
+    futureCloses.forEach((close, index) => {
+      if (!(close > 0)) return;
+      const move = ((close - entry) / entry) * 100;
+      if (move < adverse) {
+        adverse = move;
+        adverseAt = index;
+      }
+      if (move > favorable) {
+        favorable = move;
+        favorableAt = index;
+      }
+    });
+  }
+  let targetFirst: boolean | null = null;
+  if (favorableAt >= 0 && adverseAt < 0) targetFirst = true;
+  else if (adverseAt >= 0 && favorableAt < 0) targetFirst = false;
+  else if (favorableAt >= 0 && adverseAt >= 0 && favorableAt !== adverseAt) targetFirst = favorableAt < adverseAt;
+  return {
+    adversePct: Number(adverse.toFixed(2)),
+    favorablePct: Number(favorable.toFixed(2)),
+    targetFirst,
+  };
 }
 
 /** Past sessions that already have a realized 5-session outcome. The latest sessions are excluded. */
@@ -239,16 +271,7 @@ export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], ho
     const summary = summarizePriceHistory(price, through);
     const future = ordered.slice(index + 1, index + 1 + horizon);
     const forward = percentChange(price, ordered[index + horizon]?.close ?? null);
-    let adverse = 0;
-    let favorable = 0;
-    if (price != null && price > 0) {
-      for (const bar of future) {
-        const move = percentChange(price, bar.close);
-        if (move == null) continue;
-        adverse = Math.min(adverse, move);
-        favorable = Math.max(favorable, move);
-      }
-    }
+    const marks = pathMarks(price ?? 0, future.map((bar) => bar.close));
     if (
       summary.return5Pct == null
       || summary.relativeVolume == null
@@ -267,8 +290,9 @@ export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], ho
       room: summary.rise.room,
       riseScore: summary.rise.score,
       forward5Pct: forward,
-      adversePct: Number(adverse.toFixed(2)),
-      favorablePct: Number(favorable.toFixed(2)),
+      adversePct: marks.adversePct,
+      favorablePct: marks.favorablePct,
+      targetFirst: marks.targetFirst,
     });
   }
   return analogs;

@@ -58,6 +58,7 @@ test('win rate, expectancy, payoff, and path medians come from the same similar 
     forward5Pct: gain,
     adversePct: adverse[index],
     favorablePct: favorable[index],
+    targetFirst: index < 6,
   }));
   const rank = rankDailyConsiderations([
     { symbol: 'MIX', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: features },
@@ -69,4 +70,5 @@ test('win rate, expectancy, payoff, and path medians come from the same similar 
   assert.equal(pick.payoff, 3.29);
   assert.equal(pick.adversePct, -2);
   assert.equal(pick.favorablePct, 6);
+  assert.equal(pick.targetFirstPct, 75);
 });

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectForwardAnalogs, parseNasdaqHistoricalBars, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
+import { collectForwardAnalogs, parseNasdaqHistoricalBars, pathMarks, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
 
 test('nasdaq historical text rows become oldest-first daily bars', () => {
   const bars = parseNasdaqHistoricalBars({
@@ -114,6 +114,10 @@ test('a completed session keeps its later 5-session result and the unfinished ta
   assert.equal(analogs[0].forward5Pct, 0);
   assert.equal(analogs[0].adversePct, 0);
   assert.equal(analogs[0].favorablePct, 0);
+  assert.equal(analogs[0].targetFirst, null);
+  assert.equal(pathMarks(10, [11, 12, 8]).targetFirst, true);
+  assert.equal(pathMarks(10, [8, 12]).targetFirst, false);
+  assert.equal(pathMarks(10, [10, 10]).targetFirst, null);
   assert.equal(analogs[0].room, false);
   assert.equal(analogs.at(-1).date, '2026-01-25');
   assert.equal(analogs.some((analog) => analog.date === '2026-01-30'), false);

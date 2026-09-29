@@ -13,6 +13,7 @@ export interface AnalogObservation extends SetupFeatures {
   forward5Pct: number;
   adversePct?: number | null;
   favorablePct?: number | null;
+  targetFirst?: boolean | null;
 }
 
 export interface RankCandidate {
@@ -37,6 +38,7 @@ export interface DailyConsideration {
   payoff: number | null;
   adversePct: number | null;
   favorablePct: number | null;
+  targetFirstPct: number | null;
   analogs: number;
   eligible: boolean;
 }
@@ -102,6 +104,13 @@ function strengthOf(setup: SetupFeatures, projectedGainPct: number | null, socia
   ));
 }
 
+function targetFirstRate(flags: Array<boolean | null | undefined>) {
+  const marked = flags.filter((flag) => flag === true || flag === false);
+  if (!marked.length) return null;
+  const hits = marked.filter((flag) => flag === true).length;
+  return round2((hits / marked.length) * 100);
+}
+
 function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
   const nearest = analogs
     .filter((analog) => !(analog.symbol === candidate.symbol && analog.date === candidate.asOf))
@@ -110,12 +119,13 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
       gain: analog.forward5Pct,
       adverse: analog.adversePct,
       favorable: analog.favorablePct,
+      targetFirst: analog.targetFirst,
       distance: distance(candidate.setup, analog),
     }))
     .filter((analog) => analog.distance <= DISTANCE_CAP)
     .sort((left, right) => left.distance - right.distance || left.symbol.localeCompare(right.symbol));
   const used = new Map<string, number>();
-  const chosen: Array<{ gain: number; adverse: number | null | undefined; favorable: number | null | undefined }> = [];
+  const chosen: Array<{ gain: number; adverse: number | null | undefined; favorable: number | null | undefined; targetFirst: boolean | null | undefined }> = [];
   for (const analog of nearest) {
     const count = used.get(analog.symbol) ?? 0;
     if (count >= MAX_PER_SYMBOL) continue;
@@ -133,6 +143,7 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
       payoff: null,
       adversePct: null,
       favorablePct: null,
+      targetFirstPct: null,
       analogs: chosen.length,
     };
   }
@@ -152,6 +163,7 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
     payoff: averageWin != null && averageLoss != null && averageLoss > 0 ? round2(averageWin / averageLoss) : null,
     adversePct: adverse.length ? median(adverse) : null,
     favorablePct: favorable.length ? median(favorable) : null,
+    targetFirstPct: targetFirstRate(chosen.map((analog) => analog.targetFirst)),
     analogs: gains.length,
   };
 }
@@ -180,6 +192,7 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
       payoff: projection.payoff,
       adversePct: projection.adversePct,
       favorablePct: projection.favorablePct,
+      targetFirstPct: projection.targetFirstPct,
       analogs: projection.analogs,
       eligible: !candidate.blocksRoom
         && projection.projectedGainPct != null

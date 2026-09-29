@@ -109,10 +109,11 @@ export function DiscoveryBoard({ refreshToken }: { refreshToken: number }) {
   const total = Array.isArray(gems.data?.candidates) ? gems.data.candidates.length : 0;
   return <article className="surface opportunity-card">
     <div className="section-head"><div><h2>Gem candidates</h2><p>{gems.loading ? 'Ranking the penny screen.' : total ? `Showing ${candidates.length} of ${total} penny names. Common stock under $5 with at least $100,000 of dollar volume. Blank catalyst, structure, and attention were not observed.` : 'No penny-screen gem candidates yet.'}</p></div></div>
-    {candidates.length ? <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Gem</th><th>Liquidity</th><th>Catalyst</th><th>Structure</th><th>Attention gap</th><th>Why</th></tr></thead><tbody>{candidates.map((candidate) => {
-      const row = candidate as { symbol?: string; gemScore?: number | null; liquidityScore?: number | null; catalystScore?: number | null; structureScore?: number | null; attentionGapScore?: number | null; reasons?: string[] };
+    {candidates.length ? <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Price</th><th>Gem</th><th>Liquidity</th><th>Catalyst</th><th>Structure</th><th>Attention gap</th><th>Why</th></tr></thead><tbody>{candidates.map((candidate) => {
+      const row = candidate as { symbol?: string; price?: number | null; gemScore?: number | null; liquidityScore?: number | null; catalystScore?: number | null; structureScore?: number | null; attentionGapScore?: number | null; reasons?: string[] };
       const cell = (value: number | null | undefined) => value == null ? '—' : value;
-      return <tr key={row.symbol}><td><b>{row.symbol}</b></td><td>{cell(row.gemScore)}</td><td>{cell(row.liquidityScore)}</td><td>{cell(row.catalystScore)}</td><td>{cell(row.structureScore)}</td><td>{cell(row.attentionGapScore)}</td><td><small>{row.reasons?.slice(0, 2).join(' · ') || '—'}</small></td></tr>;
+      const price = row.price == null || !Number.isFinite(Number(row.price)) ? '—' : `$${Number(row.price).toFixed(Number(row.price) < 1 ? 4 : 2)}`;
+      return <tr key={row.symbol}><td><b>{row.symbol}</b></td><td>{price}</td><td>{cell(row.gemScore)}</td><td>{cell(row.liquidityScore)}</td><td>{cell(row.catalystScore)}</td><td>{cell(row.structureScore)}</td><td>{cell(row.attentionGapScore)}</td><td><small>{row.reasons?.slice(0, 2).join(' · ') || '—'}</small></td></tr>;
     })}</tbody></table></div> : <BoardState loading={gems.loading} error={gems.error} empty="No gem candidates returned." />}
     <ReportDisclosure data={candidates.length ? { count: total, sample: candidates.slice(0, 3) } : gems.data} />
   </article>;

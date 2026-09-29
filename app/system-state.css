@@ -148,6 +148,15 @@
 /* ---------- density and legibility ---------- */
 
 /* Figures that sit in columns must not jitter between renders. */
+.price-spark { display: block; }
+.price-spark.good { color: var(--green); }
+.price-spark.danger { color: var(--red); }
+.history-strip { display: flex; align-items: center; gap: 18px; margin: 8px 0 14px; }
+.history-strip .price-spark { width: 140px; height: 36px; }
+.history-strip div { display: grid; gap: 2px; }
+.history-strip span { color: var(--muted); font-size: 11px; }
+.history-table { margin-top: 8px; }
+
 .command-table td,
 .kpi strong,
 .metric-row b,

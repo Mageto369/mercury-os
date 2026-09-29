@@ -16,6 +16,7 @@ interface EventPayload {
 
 export interface GemCandidate {
   symbol: string;
+  price: number;
   gemScore: number;
   liquidityScore: number;
   catalystScore: number | null;
@@ -107,6 +108,7 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
 
     return {
       symbol: liquiditySignal.symbol,
+      price: liquiditySignal.price,
       gemScore: scored.gemScore,
       liquidityScore: liquiditySignal.liquidityScore,
       catalystScore,

@@ -30,6 +30,14 @@ type Opportunity = {
     floatShares?: number | null;
     avgDollarVolume20d?: number | null;
   };
+  history?: {
+    closes: number[];
+    sessions: Array<{ date: string; close: number; volume: number | null }>;
+    previousClose: number | null;
+    changePct: number | null;
+    high: number | null;
+    low: number | null;
+  };
   decision: {
     alpha: number;
     asymmetry: number;
@@ -239,6 +247,32 @@ export function CommandCenter() {
   </div>;
 }
 
+function formatPrice(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `$${value.toFixed(value < 1 ? 4 : 2)}`;
+}
+
+function formatChange(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return '—';
+  return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
+}
+
+function PriceSpark({ closes }: { closes: number[] }) {
+  if (closes.length < 2) return <span className="muted2">—</span>;
+  const width = 84;
+  const height = 24;
+  const low = Math.min(...closes);
+  const high = Math.max(...closes);
+  const span = high - low || 1;
+  const path = closes.map((close, index) => {
+    const x = (index / (closes.length - 1)) * width;
+    const y = height - ((close - low) / span) * (height - 2) - 1;
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(' ');
+  const up = closes[closes.length - 1] >= closes[0];
+  return <svg className={`price-spark ${up ? 'good' : 'danger'}`} width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true"><path d={path} fill="none" stroke="currentColor" strokeWidth="1.6" /></svg>;
+}
+
 function ScoreCell({ value }: { value: number }) {
   const width = Math.max(0, Math.min(100, n(value)));
   return <div className="cell-meter"><b>{value}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${width}%` }} /></span></div>;
@@ -251,14 +285,18 @@ function OpportunityTable({ ranked, selected, setSelected, sort, setSort, query,
 }) {
   return <section className="surface opportunity-card">
     <div className="section-head"><div><h2>Opportunity Command</h2><p>{opportunityTableCaption(ranked)}</p></div><div className="table-tools"><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Filter ticker" aria-label="Filter opportunities"/><select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="asymmetry">Asymmetry</option><option value="alpha">Alpha</option><option value="gem">Gem</option><option value="wave">Wave</option></select></div></div>
-    {ranked.length === 0 ? <div className="muted2" style={{padding:'18px 0'}}>No live opportunity rows available.</div> : <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Alpha</th><th>Gem</th><th>Wave</th><th>Asym.</th><th>Catalyst</th><th>Social</th><th>Liquidity</th><th>Trap</th><th>Peak</th><th>Aggr.</th><th>Action</th></tr></thead><tbody>{ranked.map(({input,decision}) => <tr key={input.symbol} onClick={() => setSelected(input.symbol)} className={input.symbol === selected ? 'selected-row' : ''}><td><b>{input.symbol}</b><small>{input.market}{input.price != null ? ` · $${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}` : ''}</small></td><td><ScoreCell value={decision.alpha}/></td><td>{input.gem}</td><td>{input.wave}</td><td><ScoreCell value={decision.asymmetry}/></td><td>{input.catalyst}</td><td>{input.social}</td><td>{input.liquidity}</td><td>{input.trapRisk}</td><td>{input.peakRisk}</td><td>{decision.aggression}/5</td><td><span className={`badge ${decision.hardBlocked ? 'danger' : 'good'}`}>{decision.action?.replaceAll('_',' ')}</span></td></tr>)}</tbody></table></div>}
+    {ranked.length === 0 ? <div className="muted2" style={{padding:'18px 0'}}>No live opportunity rows available.</div> : <div className="table-scroll"><table className="command-table"><thead><tr><th>Ticker</th><th>Price</th><th>30d</th><th>Alpha</th><th>Gem</th><th>Wave</th><th>Asym.</th><th>Catalyst</th><th>Social</th><th>Liquidity</th><th>Trap</th><th>Peak</th><th>Aggr.</th><th>Action</th></tr></thead><tbody>{ranked.map((row) => {
+      const { input, decision, history } = row;
+      return <tr key={input.symbol} onClick={() => setSelected(input.symbol)} className={input.symbol === selected ? 'selected-row' : ''}><td><b>{input.symbol}</b><small>{input.market}</small></td><td><b>{formatPrice(input.price)}</b><small className={history?.changePct != null && history.changePct < 0 ? 'danger' : 'good'}>{formatChange(history?.changePct)}</small></td><td><PriceSpark closes={history?.closes ?? []} /></td><td><ScoreCell value={decision.alpha}/></td><td>{input.gem}</td><td>{input.wave}</td><td><ScoreCell value={decision.asymmetry}/></td><td>{input.catalyst}</td><td>{input.social}</td><td>{input.liquidity}</td><td>{input.trapRisk}</td><td>{input.peakRisk}</td><td>{decision.aggression}/5</td><td><span className={`badge ${decision.hardBlocked ? 'danger' : 'good'}`}>{decision.action?.replaceAll('_',' ')}</span></td></tr>;
+    })}</tbody></table></div>}
   </section>;
 }
 
 function OpportunityDetail({ opportunity }: { opportunity: Opportunity }) {
-  const { input, decision } = opportunity;
+  const { input, decision, history } = opportunity;
+  const sessions = history?.sessions ?? [];
   return <section className="detail-grid">
-    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{input.price == null ? '—' : `$${n(input.price).toFixed(n(input.price) < 1 ? 4 : 2)}`}</strong><span className="good">Asym {decision.asymmetry}</span></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{value}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, n(value)))}%` }} /></span></div>)}</div></div>
+    <div className="surface ticker-detail"><div className="section-head"><div><div className="eyebrow">{opportunity.modelVersion === 'mercury-delayed-reference-v1' ? 'Selected delayed-reference opportunity' : 'Selected live opportunity'}</div><h2>{input.symbol} <span className="muted2">{input.market}</span></h2></div><div className="price-block"><strong>{formatPrice(input.price)}</strong><span className={history?.changePct != null && history.changePct < 0 ? 'danger' : 'good'}>{formatChange(history?.changePct)}</span></div></div><div className="history-strip"><PriceSpark closes={history?.closes ?? []} /><div><span>Prior close</span><b>{formatPrice(history?.previousClose)}</b></div><div><span>30d high</span><b>{formatPrice(history?.high)}</b></div><div><span>30d low</span><b>{formatPrice(history?.low)}</b></div></div><div className="factor-grid2">{[['Gem',input.gem],['Wave',input.wave],['Catalyst',input.catalyst],['Social',input.social],['Liquidity',input.liquidity],['Confidence',input.confidence],['Trap',input.trapRisk],['Peak',input.peakRisk]].map(([name,value]) => <div key={String(name)}><span>{name}</span><b>{value}</b><span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, n(value)))}%` }} /></span></div>)}</div>{sessions.length ? <table className="command-table history-table"><thead><tr><th>Session</th><th>Close</th><th>Volume</th></tr></thead><tbody>{sessions.map((session) => <tr key={session.date}><td>{session.date}</td><td>{formatPrice(session.close)}</td><td>{session.volume == null ? '—' : session.volume.toLocaleString()}</td></tr>)}</tbody></table> : <p className="muted2">No delayed daily history stored for this name yet.</p>}</div>
     <div className="surface allocation-card"><h2>Decision Brain</h2><div className="allocation-action"><span>Current shadow action</span><strong>{decision.action?.replaceAll('_',' ')}</strong><p>{decision.reasons?.slice(0,3).join(' · ') || 'No rationale recorded.'}</p></div><div className="allocation-list"><div><span>Aggression</span><b>{decision.aggression}/5</b></div><div><span>Alpha</span><b>{decision.alpha}</b></div><div><span>Hard blocked</span><b>{decision.hardBlocked ? 'YES' : 'NO'}</b></div><div><span>Float</span><b>{input.floatShares == null ? '—' : `${(input.floatShares / 1e6).toFixed(1)}M`}</b></div></div></div>
   </section>;
 }

@@ -11,6 +11,9 @@ export interface SymbolPriceHistory {
   changePct: number | null;
   high: number | null;
   low: number | null;
+  return5Pct: number | null;
+  relativeVolume: number | null;
+  rangePositionPct: number | null;
 }
 
 const EMPTY_HISTORY: SymbolPriceHistory = {
@@ -20,7 +23,46 @@ const EMPTY_HISTORY: SymbolPriceHistory = {
   changePct: null,
   high: null,
   low: null,
+  return5Pct: null,
+  relativeVolume: null,
+  rangePositionPct: null,
 };
+
+const RELATIVE_VOLUME_BASELINE = 20;
+const RELATIVE_VOLUME_MIN_SESSIONS = 5;
+
+function percentChange(from: number | null, to: number | null) {
+  if (from == null || to == null || !(from > 0) || !Number.isFinite(to)) return null;
+  return Number((((to - from) / from) * 100).toFixed(2));
+}
+
+function closeSessionsAgo(closes: number[], sessionsAgo: number, sameAsLast: boolean) {
+  const index = closes.length - (sameAsLast ? sessionsAgo + 1 : sessionsAgo);
+  if (index < 0) return null;
+  return closes[index] ?? null;
+}
+
+function relativeVolume(bars: StoredDailyBar[], sameAsLast: boolean) {
+  if (!sameAsLast) return null;
+  const latest = bars[bars.length - 1]?.volume;
+  if (latest == null || !(latest > 0)) return null;
+  const prior = bars
+    .slice(0, -1)
+    .slice(-RELATIVE_VOLUME_BASELINE)
+    .map((bar) => bar.volume)
+    .filter((volume): volume is number => volume != null && volume > 0);
+  if (prior.length < RELATIVE_VOLUME_MIN_SESSIONS) return null;
+  const average = prior.reduce((sum, volume) => sum + volume, 0) / prior.length;
+  if (!(average > 0)) return null;
+  return Number((latest / average).toFixed(2));
+}
+
+function rangePosition(price: number | null, high: number | null, low: number | null) {
+  if (price == null || high == null || low == null) return null;
+  const span = high - low;
+  if (!(span > 0)) return null;
+  return Number((((price - low) / span) * 100).toFixed(0));
+}
 
 export function summarizePriceHistory(price: number | null, bars: StoredDailyBar[]): SymbolPriceHistory {
   const ordered = [...bars].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
@@ -30,16 +72,18 @@ export function summarizePriceHistory(price: number | null, bars: StoredDailyBar
   const prior = closes.length >= 2 ? closes[closes.length - 2] ?? null : null;
   const sameAsLast = price != null && latest != null && Math.abs(price - latest) < 0.0001;
   const previousClose = sameAsLast ? prior : latest;
-  const changePct = price != null && previousClose != null && previousClose > 0
-    ? Number((((price - previousClose) / previousClose) * 100).toFixed(2))
-    : null;
+  const high = Number(Math.max(...closes).toFixed(4));
+  const low = Number(Math.min(...closes).toFixed(4));
   return {
     closes,
     sessions: [...ordered].reverse().slice(0, 8),
     previousClose,
-    changePct,
-    high: Number(Math.max(...closes).toFixed(4)),
-    low: Number(Math.min(...closes).toFixed(4)),
+    changePct: percentChange(previousClose, price),
+    high,
+    low,
+    return5Pct: percentChange(closeSessionsAgo(closes, 5, sameAsLast), price),
+    relativeVolume: relativeVolume(ordered, sameAsLast),
+    rangePositionPct: rangePosition(price, high, low),
   };
 }
 

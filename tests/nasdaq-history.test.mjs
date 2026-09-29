@@ -30,11 +30,44 @@ test('change uses the prior session when the latest bar matches the quoted price
   assert.deepEqual(history.closes, [2.92, 3.29]);
   assert.equal(history.high, 3.29);
   assert.equal(history.low, 2.92);
+  assert.equal(history.return5Pct, null);
+  assert.equal(history.relativeVolume, null);
+  assert.equal(history.rangePositionPct, 100);
+});
+
+test('five-session return, relative volume, and range use the stored bars', () => {
+  const closes = [2, 2.1, 2.2, 2.3, 2.4, 2.5, 3];
+  const history = summarizePriceHistory(3, closes.map((close, index) => ({
+    date: `2026-09-${String(index + 10).padStart(2, '0')}`,
+    close,
+    volume: index === closes.length - 1 ? 200 : 100,
+  })));
+  assert.equal(history.return5Pct, 42.86);
+  assert.equal(history.relativeVolume, 2);
+  assert.equal(history.rangePositionPct, 100);
+});
+
+test('a quote ahead of the last bar does not borrow that bar as today volume', () => {
+  const history = summarizePriceHistory(3.1, [
+    { date: '2026-09-18', close: 2, volume: 100 },
+    { date: '2026-09-21', close: 2.1, volume: 100 },
+    { date: '2026-09-22', close: 2.2, volume: 100 },
+    { date: '2026-09-23', close: 2.3, volume: 100 },
+    { date: '2026-09-24', close: 2.4, volume: 100 },
+    { date: '2026-09-25', close: 2.5, volume: 100 },
+    { date: '2026-09-28', close: 3, volume: 200 },
+  ]);
+  assert.equal(history.relativeVolume, null);
+  assert.equal(history.return5Pct, 40.91);
+  assert.equal(history.changePct, 3.33);
 });
 
 test('an empty history does not invent a change', () => {
   const history = summarizePriceHistory(3.29, []);
   assert.equal(history.previousClose, null);
   assert.equal(history.changePct, null);
+  assert.equal(history.return5Pct, null);
+  assert.equal(history.relativeVolume, null);
+  assert.equal(history.rangePositionPct, null);
   assert.deepEqual(history.closes, []);
 });

@@ -1,6 +1,8 @@
 import { getSql } from "@/lib/db";
+import { loadDailyHistory } from "@/lib/market/daily-history";
+import { summarizePriceHistory } from "@/lib/market/nasdaq-history";
 import { submitPaperOrder } from "@/lib/paper/submit-order";
-import { screenPennyStock } from "@/lib/workflows/penny-screen";
+import { screenPaperBuy } from "@/lib/workflows/penny-screen";
 
 export type PaperEngineAction = "PRESS" | "WAVE_ACTIVE" | "GEM_WATCH" | "WATCH" | "REDUCE" | "EXIT" | "BLOCK";
 
@@ -115,7 +117,7 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
 
   const maxOrders = Math.max(1, Math.min(25, Number(process.env.PAPER_ENGINE_MAX_ORDERS ?? 8)));
   const positions = input?.positions ?? [];
-  const buys: PaperEngineCandidate[] = [];
+  const staged: PaperEngineCandidate[] = [];
   for (const position of positions) {
     const action = String(position.action ?? "");
     if (!BUY_ACTIONS.has(action)) continue;
@@ -124,8 +126,15 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
     const notional = Number(position.notional ?? 0);
     const price = Number(position.price ?? 0);
     if (!symbol || !opportunityId) continue;
-    if (!screenPennyStock({ symbol, price: Number.isFinite(price) ? price : null }).pass) continue;
-    buys.push({ symbol, opportunityId, action, notional, price });
+    staged.push({ symbol, opportunityId, action, notional, price: Number.isFinite(price) ? price : 0 });
+  }
+  const histories = await loadDailyHistory(staged.map((candidate) => candidate.symbol));
+  const buys: PaperEngineCandidate[] = [];
+  for (const candidate of staged) {
+    const bars = histories.get(candidate.symbol) ?? [];
+    const room = summarizePriceHistory(candidate.price, bars).rise.room;
+    if (!screenPaperBuy({ symbol: candidate.symbol, price: candidate.price, room }).pass) continue;
+    buys.push(candidate);
   }
 
   const exits = await sql<{ symbol: string; opportunity_id: string; action: string; quantity: number; price: number }[]>`
@@ -182,7 +191,9 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
       pricingMode: "auto",
       timeInForce: "day",
       idempotencyKey: intent.idempotencyKey,
-      thesis: "Paper engine translated a shadow decision into a virtual order.",
+      thesis: intent.side === "buy"
+        ? "Paper engine bought a penny name marked rise-with-room."
+        : "Paper engine translated a shadow exit into a virtual order.",
       riskNotes: "Virtual ledger only. Broker is not connected.",
     });
     submitted += 1;

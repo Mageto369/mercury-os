@@ -49,3 +49,11 @@ export function screenPennyStock(input: PennyScreenInput): PennyScreenResult {
 
   return { pass: reasons.length === 0, reasons };
 }
+
+/** New simulated buys. Penny screen first, then the rise-with-room rank. */
+export function screenPaperBuy(input: { symbol: string; price: number | null; room: boolean }): PennyScreenResult {
+  const penny = screenPennyStock({ symbol: input.symbol, price: input.price });
+  if (!penny.pass) return penny;
+  if (!input.room) return { pass: false, reasons: ['rise is not marked room'] };
+  return { pass: true, reasons: ['rise with room'] };
+}

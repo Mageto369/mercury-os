@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { screenPennyStock } from '../lib/workflows/penny-screen.ts';
+import { screenPaperBuy, screenPennyStock } from '../lib/workflows/penny-screen.ts';
 
 test('a liquid common stock under $5 passes the penny screen', () => {
   const result = screenPennyStock({ symbol: 'akba', price: 0.89, dollarVolume: 3_000_000, spreadBps: null });
@@ -27,4 +27,11 @@ test('missing price, thin volume, a wide spread, and a warrant all fail', () => 
 test('a price-only auto-buy check still rejects a large cap', () => {
   assert.equal(screenPennyStock({ symbol: 'AA', price: 42.25 }).pass, false);
   assert.equal(screenPennyStock({ symbol: 'ALT', price: 2.96 }).pass, true);
+});
+
+test('a new simulated buy requires the rise-with-room rank', () => {
+  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: 3.59, room: true }).pass, true);
+  assert.deepEqual(screenPaperBuy({ symbol: 'AMC', price: 3.29, room: false }).reasons, ['rise is not marked room']);
+  assert.equal(screenPaperBuy({ symbol: 'AA', price: 42.25, room: true }).pass, false);
+  assert.equal(screenPaperBuy({ symbol: 'AFCG', price: null, room: true }).pass, false);
 });

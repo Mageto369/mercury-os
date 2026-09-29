@@ -119,7 +119,7 @@ function evidenceBanner(mode: string, evidenceScope: string) {
 }
 
 function opportunityTableCaption(ranked: Opportunity[]) {
-  const screen = 'Penny screen keeps common stock under $5 with at least $100,000 of dollar volume.';
+  const screen = 'Penny screen keeps common stock under $5 with at least $100,000 of dollar volume. New simulated buys also require a ROOM rank.';
   const reference = ranked.filter((row) => row.modelVersion === 'mercury-delayed-reference-v1').length;
   if (ranked.length > 0 && reference === ranked.length) return `Delayed Nasdaq reference rows. They do not count as live proof. ${screen}`;
   if (reference > 0) return `Live and delayed-reference rows. Delayed rows do not count as live proof. ${screen}`;

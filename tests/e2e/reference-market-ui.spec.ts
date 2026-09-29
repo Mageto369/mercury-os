@@ -48,6 +48,11 @@ test("command center labels delayed-reference opportunities as research context"
   await expect(page.getByText("Reference Opportunities")).toBeVisible();
   await expect(page.getByText("not live proof").first()).toBeVisible();
   await expect(page.getByText("Selected delayed-reference opportunity")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Command deck" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Asymmetry ladder" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Virtual book" })).toBeVisible();
+  await page.getByLabel("Filter opportunities").fill("ACTU");
+  await expect(page.getByRole("row", { name: /ACTU/ })).toBeVisible();
 });
 
 test("Market separates delayed quotes from live opportunity scoring", async ({

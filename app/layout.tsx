@@ -5,6 +5,7 @@ import "./autonomy.css";
 import "./live-warehouse.css";
 import "./agents.css";
 import "./system-state.css";
+import "./command-deck.css";
 import { SystemStateRail } from "@/components/system-state-rail";
 import { SystemStateProvider } from "@/components/system-state-provider";
 

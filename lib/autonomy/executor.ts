@@ -92,7 +92,7 @@ export async function executeAutonomousJob(job: IntelligenceJobDefinition): Prom
   if (job.name === 'market-regime' && readiness.database.configured) {
     try {
       const result = await runMarketRegimeWorkflow();
-      return { name: job.name, status: result.snapshotsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.symbolsObserved, message: `Market regime ${result.regime} with outlook ${result.outlookScore}, ${result.symbolsObserved} symbols, median RVOL ${result.medianRvol}, median spread ${result.medianSpreadBps} bps.` };
+      return { name: job.name, status: result.snapshotsChecked ? 'completed' : 'degraded', shadowOnly: true, startedAt: startedAt.toISOString(), completedAt: new Date().toISOString(), requiredProviders, configuredProviders, missingProviders, actionCount: result.symbolsObserved, message: `Market regime ${result.regime} (${result.basis}) with outlook ${result.outlookScore}, ${result.symbolsObserved} symbols, median RVOL ${result.medianRvol ?? 'n/a'}, median spread ${result.medianSpreadBps ?? 'n/a'} bps.` };
     } catch (error) { return failedJob(job, startedAt, requiredProviders, configuredProviders, missingProviders, 'Market Regime', error); }
   }
 

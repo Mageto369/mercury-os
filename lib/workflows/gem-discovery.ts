@@ -90,7 +90,7 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
     if (liquiditySignal.liquidityScore >= 75) reasons.push('strong tradable liquidity');
     if (catalystScore >= 68) reasons.push('recent regulatory catalyst support');
     if (structureScore >= 85) reasons.push('clean structural-risk profile');
-    if (attentionGapScore >= 75) reasons.push('low-crowding attention gap');
+    if (socialSignal && attentionGapScore >= 75) reasons.push('low-crowding attention gap');
     if (promotionRisk >= 55) reasons.push('promotion pressure reduces quality');
     if (riskFlag) reasons.push('structural warning present');
 

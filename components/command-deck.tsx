@@ -11,8 +11,9 @@ type RegimeReport = {
   regime?: string | null;
   outlookScore?: number;
   symbolsObserved?: number;
-  medianRvol?: number;
-  medianSpreadBps?: number;
+  medianRvol?: number | null;
+  medianSpreadBps?: number | null;
+  basis?: string;
   snapshotsChecked?: number;
 } | null;
 
@@ -179,8 +180,9 @@ export function CommandDeck({
         </div>
         <Meter value={outlook} tone={outlookTone} />
         <div className="deck-stats">
-          <div><span>Median RVOL</span><b>{regime?.medianRvol ?? '—'}</b></div>
-          <div><span>Median spread</span><b>{regime?.medianSpreadBps != null ? `${regime.medianSpreadBps} bps` : '—'}</b></div>
+          <div><span>Median RVOL</span><b>{regime?.medianRvol == null ? '—' : regime.medianRvol}</b></div>
+          <div><span>Median spread</span><b>{regime?.medianSpreadBps == null ? '—' : `${regime.medianSpreadBps} bps`}</b></div>
+          <div><span>Basis</span><b>{regime?.basis === 'volume-breadth' ? 'volume' : regime?.basis === 'microstructure' ? 'full' : '—'}</b></div>
           <div><span>Universe</span><b>{warehouse?.liveSecurities ?? '—'}</b></div>
         </div>
         <div className="deck-actions" aria-hidden="true">

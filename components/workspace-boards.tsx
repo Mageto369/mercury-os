@@ -67,17 +67,17 @@ export function MarketOutlookBoard({ refreshToken }: { refreshToken: number }) {
   const signals = Array.isArray(liquidity.data?.signals) ? liquidity.data.signals.slice(0, 12) : [];
   const providerRows = Array.isArray(providers.data?.providers) ? providers.data.providers : [];
   const outlook = num(regime.data?.outlookScore);
-  const thinTape = num(regime.data?.medianRvol) === 0 && num(regime.data?.medianSpreadBps) === 0 && num(regime.data?.snapshotsChecked);
+  const thinTape = regime.data?.basis === 'volume-breadth';
 
   return <section className="board-stack" aria-label="Market outlook board">
     <div className="board-split">
       <article className="surface deck-card">
-        <div className="section-head"><div><h2>Regime</h2><p>{regime.loading ? 'Reading the latest regime.' : thinTape ? 'Delayed daily bars have no RVOL or spread, so the outlook stays conservative.' : 'Regime is derived from stored market snapshots.'}</p></div></div>
+        <div className="section-head"><div><h2>Regime</h2><p>{regime.loading ? 'Reading the latest regime.' : thinTape ? 'Delayed daily bars have no RVOL or spread, so outlook is dollar-volume breadth.' : 'Regime is derived from stored market snapshots.'}</p></div></div>
         <div className="deck-regime"><b className={regime.data?.regime ? 'good' : 'warn'}>{regime.loading ? '…' : text(regime.data?.regime, 'NO REGIME')}</b><span className="muted2">outlook {outlook ?? '—'}</span></div>
         <span className="deck-meter" aria-hidden="true"><i style={{ width: `${Math.max(0, Math.min(100, outlook ?? 0))}%` }} /></span>
         <div className="deck-stats">
           <div><span>Symbols</span><b>{text(regime.data?.symbolsObserved ?? regime.data?.snapshotsChecked)}</b></div>
-          <div><span>Median RVOL</span><b>{text(regime.data?.medianRvol)}</b></div>
+          <div><span>Median RVOL</span><b>{regime.data?.medianRvol == null ? '—' : text(regime.data.medianRvol)}</b></div>
           <div><span>Median spread</span><b>{regime.data?.medianSpreadBps == null ? '—' : `${regime.data.medianSpreadBps} bps`}</b></div>
           <div><span>Breadth</span><b>{text(regime.data?.breadthProxy)}</b></div>
           <div><span>Float rotation</span><b>{text(regime.data?.avgFloatRotation)}</b></div>

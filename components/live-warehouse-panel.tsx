@@ -8,8 +8,8 @@ type Regime = {
   regime: "RISK_ON" | "SELECTIVE" | "DEFENSIVE" | null;
   outlookScore?: number;
   symbolsObserved?: number;
-  medianRvol?: number;
-  medianSpreadBps?: number;
+  medianRvol?: number | null;
+  medianSpreadBps?: number | null;
 };
 
 type LiquiditySignal = {
@@ -219,10 +219,10 @@ export function LiveWarehousePanel() {
                   Symbols <b>{regime.symbolsObserved}</b>
                 </span>
                 <span>
-                  Median RVOL <b>{regime.medianRvol}</b>
+                  Median RVOL <b>{regime.medianRvol ?? "—"}</b>
                 </span>
                 <span>
-                  Median spread <b>{regime.medianSpreadBps} bps</b>
+                  Median spread <b>{regime.medianSpreadBps == null ? "—" : `${regime.medianSpreadBps} bps`}</b>
                 </span>
               </div>
             </>

@@ -1,4 +1,5 @@
 import { loadResearchQuotes, type QuoteEvidenceClass } from '@/lib/market/research-quotes';
+import { scoreLiquidity } from '@/lib/workflows/research-scores';
 
 export interface LiquiditySignal {
   symbol: string;
@@ -16,18 +17,6 @@ export interface LiquiditySignal {
 export interface LiquidityPulseResult {
   snapshotsChecked: number;
   signals: LiquiditySignal[];
-}
-
-function clamp(value: number) {
-  return Math.max(0, Math.min(100, Math.round(value)));
-}
-
-function scoreLiquidity(dollarVolume: number, spreadBps: number | null, rvol: number | null, floatRotation: number | null) {
-  const volumeScore = clamp(Math.log10(Math.max(1, dollarVolume)) * 15 - 30);
-  const spreadScore = spreadBps === null ? 50 : clamp(100 - spreadBps / 5);
-  const rvolScore = rvol === null ? 50 : clamp(35 + Math.min(65, rvol * 18));
-  const rotationScore = floatRotation === null ? 50 : clamp(45 + Math.min(55, floatRotation * 12));
-  return clamp(volumeScore * 0.4 + spreadScore * 0.3 + rvolScore * 0.2 + rotationScore * 0.1);
 }
 
 export async function runLiquidityPulseWorkflow(): Promise<LiquidityPulseResult> {
@@ -52,7 +41,7 @@ export async function runLiquidityPulseWorkflow(): Promise<LiquidityPulseResult>
       observedAt: row.observedAt.toISOString(),
       evidenceClass: row.evidenceClass,
     };
-  }).sort((a, b) => b.liquidityScore - a.liquidityScore);
+  }).sort((a, b) => b.liquidityScore - a.liquidityScore || b.dollarVolume - a.dollarVolume);
 
   return { snapshotsChecked: rows.length, signals };
 }

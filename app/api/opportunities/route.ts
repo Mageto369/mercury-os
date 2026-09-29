@@ -4,6 +4,8 @@ import { scoreOpportunity } from '@/lib/alpha/scoring';
 import type { OpportunityInput } from '@/lib/domain/types';
 import { sampleUniverse } from '@/lib/intelligence/sample-universe';
 import { loadDailyHistory } from '@/lib/market/daily-history';
+import { applyPricePush, EMPTY_PRICE_PUSH } from '@/lib/market/price-push';
+import { loadPricePush } from '@/lib/market/attention';
 import { summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
 import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
@@ -210,14 +212,21 @@ export async function GET() {
       .sort((a, b) => b.decision.asymmetry - a.decision.asymmetry || b.decision.alpha - a.decision.alpha)
       .slice(0, 100);
 
-    const histories = await loadDailyHistory(opportunities.map((row) => String(row.input.symbol)));
-    const withHistory = opportunities.map((opportunity) => ({
-      ...opportunity,
-      history: summarizePriceHistory(
-        opportunity.input.price,
-        histories.get(String(opportunity.input.symbol).toUpperCase()) ?? [],
-      ),
-    }));
+    const symbols = opportunities.map((row) => String(row.input.symbol));
+    const [histories, pushes] = await Promise.all([
+      loadDailyHistory(symbols),
+      loadPricePush(symbols),
+    ]);
+    const withHistory = opportunities.map((opportunity) => {
+      const symbol = String(opportunity.input.symbol).toUpperCase();
+      const history = summarizePriceHistory(opportunity.input.price, histories.get(symbol) ?? []);
+      const push = pushes.get(symbol);
+      return {
+        ...opportunity,
+        push,
+        history: { ...history, rise: applyPricePush(history.rise, push ?? EMPTY_PRICE_PUSH) },
+      };
+    });
 
     const evidence = summarizeOpportunityEvidence(withHistory.map((row) => row.modelVersion));
     return NextResponse.json({

@@ -1,6 +1,8 @@
 import { getSql } from "@/lib/db";
+import { loadPricePush } from "@/lib/market/attention";
 import { loadDailyHistory } from "@/lib/market/daily-history";
 import { summarizePriceHistory } from "@/lib/market/nasdaq-history";
+import { applyPricePush, EMPTY_PRICE_PUSH } from "@/lib/market/price-push";
 import { submitPaperOrder } from "@/lib/paper/submit-order";
 import { screenPaperBuy } from "@/lib/workflows/penny-screen";
 
@@ -129,11 +131,13 @@ export async function runPaperEngine(input?: { positions?: Array<Record<string, 
     staged.push({ symbol, opportunityId, action, notional, price: Number.isFinite(price) ? price : 0 });
   }
   const histories = await loadDailyHistory(staged.map((candidate) => candidate.symbol));
+  const pushes = await loadPricePush(staged.map((candidate) => candidate.symbol));
   const buys: PaperEngineCandidate[] = [];
   for (const candidate of staged) {
     const bars = histories.get(candidate.symbol) ?? [];
-    const room = summarizePriceHistory(candidate.price, bars).rise.room;
-    if (!screenPaperBuy({ symbol: candidate.symbol, price: candidate.price, room }).pass) continue;
+    const push = pushes.get(candidate.symbol);
+    const rise = applyPricePush(summarizePriceHistory(candidate.price, bars).rise, push ?? EMPTY_PRICE_PUSH);
+    if (!screenPaperBuy({ symbol: candidate.symbol, price: candidate.price, room: rise.room }).pass) continue;
     buys.push(candidate);
   }
 

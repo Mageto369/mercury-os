@@ -37,13 +37,6 @@ const OrderSchema = z
 const IdempotencyKeySchema = z.string().regex(/^[A-Za-z0-9._:-]{16,128}$/);
 
 export async function POST(request: Request) {
-  const sql = getSql();
-  if (!sql)
-    return NextResponse.json(
-      { ok: false, error: "database_not_configured" },
-      { status: 503 },
-    );
-
   const parsed = OrderSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success)
     return NextResponse.json(
@@ -58,6 +51,13 @@ export async function POST(request: Request) {
     return NextResponse.json(
       { ok: false, error: "valid_idempotency_key_required" },
       { status: 400 },
+    );
+
+  const sql = getSql();
+  if (!sql)
+    return NextResponse.json(
+      { ok: false, error: "database_not_configured" },
+      { status: 503 },
     );
 
   try {

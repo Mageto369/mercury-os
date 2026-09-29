@@ -15,6 +15,7 @@ test("paper mutations are open and still require persistence", async ({
   request,
 }) => {
   const order = await request.post("/api/paper/orders", {
+    headers: { "idempotency-key": "paper-e2e-no-database" },
     data: { symbol: "TEST", side: "buy", quantity: 1, orderType: "market" },
   });
   expect(order.status()).toBe(503);

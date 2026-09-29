@@ -7,6 +7,7 @@ import { loadDailyHistory } from '@/lib/market/daily-history';
 import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
 import { rankDailyConsiderations } from '@/lib/market/daily-rank';
+import { sessionRisk } from '@/lib/market/quant-stats';
 import { collectForwardAnalogs, summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
 import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
@@ -313,10 +314,14 @@ export async function GET() {
     });
     const dailyRank = rankDailyConsiderations(candidates, analogs);
     const projectionBySymbol = new Map(dailyRank.considered.map((row) => [row.symbol, row]));
-    const rankedBook = withHistory.map((row) => ({
-      ...row,
-      projection: projectionBySymbol.get(String(row.input.symbol).toUpperCase()) ?? null,
-    }));
+    const rankedBook = withHistory.map((row) => {
+      const symbol = String(row.input.symbol).toUpperCase();
+      return {
+        ...row,
+        projection: projectionBySymbol.get(symbol) ?? null,
+        risk: sessionRisk(row.input.price, histories.get(symbol) ?? []),
+      };
+    });
 
     const evidence = summarizeOpportunityEvidence(rankedBook.map((row) => row.modelVersion));
     return NextResponse.json({

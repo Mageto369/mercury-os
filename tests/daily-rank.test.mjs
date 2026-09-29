@@ -41,6 +41,9 @@ test('a better projected gain ranks above a louder stretched setup', () => {
   ]);
   assert.deepEqual(rank.picks.map((pick) => pick.symbol), ['FOLLOW', 'ROOM', 'LOUD']);
   assert.equal(rank.picks[0].projectedGainPct, 3);
+  assert.equal(rank.picks[0].winRatePct, 100);
+  assert.equal(rank.picks[0].expectancyPct, 3);
+  assert.equal(rank.picks[0].payoff, null);
   assert.equal(rank.picks[0].rank, 1);
   assert.equal(rank.picks[1].room, true);
   assert.equal(rank.picks[1].projectedGainPct, -1);

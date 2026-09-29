@@ -225,6 +225,8 @@ export interface ForwardAnalog {
   room: boolean;
   riseScore: number;
   forward5Pct: number;
+  adversePct: number;
+  favorablePct: number;
 }
 
 /** Past sessions that already have a realized 5-session outcome. The latest sessions are excluded. */
@@ -235,7 +237,18 @@ export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], ho
     const through = ordered.slice(0, index + 1);
     const price = through[through.length - 1]?.close ?? null;
     const summary = summarizePriceHistory(price, through);
+    const future = ordered.slice(index + 1, index + 1 + horizon);
     const forward = percentChange(price, ordered[index + horizon]?.close ?? null);
+    let adverse = 0;
+    let favorable = 0;
+    if (price != null && price > 0) {
+      for (const bar of future) {
+        const move = percentChange(price, bar.close);
+        if (move == null) continue;
+        adverse = Math.min(adverse, move);
+        favorable = Math.max(favorable, move);
+      }
+    }
     if (
       summary.return5Pct == null
       || summary.relativeVolume == null
@@ -254,6 +267,8 @@ export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], ho
       room: summary.rise.room,
       riseScore: summary.rise.score,
       forward5Pct: forward,
+      adversePct: Number(adverse.toFixed(2)),
+      favorablePct: Number(favorable.toFixed(2)),
     });
   }
   return analogs;

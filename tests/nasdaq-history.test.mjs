@@ -112,6 +112,8 @@ test('a completed session keeps its later 5-session result and the unfinished ta
   const analogs = collectForwardAnalogs('FLAT', bars);
   assert.ok(analogs.length >= 1);
   assert.equal(analogs[0].forward5Pct, 0);
+  assert.equal(analogs[0].adversePct, 0);
+  assert.equal(analogs[0].favorablePct, 0);
   assert.equal(analogs[0].room, false);
   assert.equal(analogs.at(-1).date, '2026-01-25');
   assert.equal(analogs.some((analog) => analog.date === '2026-01-30'), false);

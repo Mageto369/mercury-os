@@ -11,6 +11,8 @@ export interface AnalogObservation extends SetupFeatures {
   symbol: string;
   date: string;
   forward5Pct: number;
+  adversePct?: number | null;
+  favorablePct?: number | null;
 }
 
 export interface RankCandidate {
@@ -30,13 +32,18 @@ export interface DailyConsideration {
   projectedGainPct: number | null;
   projectedLowPct: number | null;
   projectedHighPct: number | null;
+  winRatePct: number | null;
+  expectancyPct: number | null;
+  payoff: number | null;
+  adversePct: number | null;
+  favorablePct: number | null;
   analogs: number;
   eligible: boolean;
 }
 
 export interface DailyRank {
   horizonSessions: 5;
-  model: "mercury-analog-rank-v1";
+  model: "mercury-analog-rank-v2";
   picks: DailyConsideration[];
   considered: DailyConsideration[];
 }
@@ -98,26 +105,53 @@ function strengthOf(setup: SetupFeatures, projectedGainPct: number | null, socia
 function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
   const nearest = analogs
     .filter((analog) => !(analog.symbol === candidate.symbol && analog.date === candidate.asOf))
-    .map((analog) => ({ symbol: analog.symbol, gain: analog.forward5Pct, distance: distance(candidate.setup, analog) }))
+    .map((analog) => ({
+      symbol: analog.symbol,
+      gain: analog.forward5Pct,
+      adverse: analog.adversePct,
+      favorable: analog.favorablePct,
+      distance: distance(candidate.setup, analog),
+    }))
     .filter((analog) => analog.distance <= DISTANCE_CAP)
     .sort((left, right) => left.distance - right.distance || left.symbol.localeCompare(right.symbol));
   const used = new Map<string, number>();
-  const chosen: number[] = [];
+  const chosen: Array<{ gain: number; adverse: number | null | undefined; favorable: number | null | undefined }> = [];
   for (const analog of nearest) {
     const count = used.get(analog.symbol) ?? 0;
     if (count >= MAX_PER_SYMBOL) continue;
     used.set(analog.symbol, count + 1);
-    chosen.push(analog.gain);
+    chosen.push(analog);
     if (chosen.length >= MAX_ANALOGS) break;
   }
   if (chosen.length < MIN_ANALOGS) {
-    return { projectedGainPct: null, projectedLowPct: null, projectedHighPct: null, analogs: chosen.length };
+    return {
+      projectedGainPct: null,
+      projectedLowPct: null,
+      projectedHighPct: null,
+      winRatePct: null,
+      expectancyPct: null,
+      payoff: null,
+      adversePct: null,
+      favorablePct: null,
+      analogs: chosen.length,
+    };
   }
-  const gains = [...chosen].sort((left, right) => left - right);
+  const gains = chosen.map((analog) => analog.gain).sort((left, right) => left - right);
+  const adverse = chosen.map((analog) => analog.adverse).filter((value): value is number => value != null && Number.isFinite(value)).sort((left, right) => left - right);
+  const favorable = chosen.map((analog) => analog.favorable).filter((value): value is number => value != null && Number.isFinite(value)).sort((left, right) => left - right);
+  const wins = gains.filter((gain) => gain > 0);
+  const losses = gains.filter((gain) => gain < 0);
+  const averageWin = wins.length ? wins.reduce((sum, gain) => sum + gain, 0) / wins.length : null;
+  const averageLoss = losses.length ? Math.abs(losses.reduce((sum, gain) => sum + gain, 0) / losses.length) : null;
   return {
     projectedGainPct: median(gains),
     projectedLowPct: percentile(gains, 0.25),
     projectedHighPct: percentile(gains, 0.75),
+    winRatePct: round2((wins.length / gains.length) * 100),
+    expectancyPct: round2(gains.reduce((sum, gain) => sum + gain, 0) / gains.length),
+    payoff: averageWin != null && averageLoss != null && averageLoss > 0 ? round2(averageWin / averageLoss) : null,
+    adversePct: adverse.length ? median(adverse) : null,
+    favorablePct: favorable.length ? median(favorable) : null,
     analogs: gains.length,
   };
 }
@@ -141,6 +175,11 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
       projectedGainPct: projection.projectedGainPct,
       projectedLowPct: projection.projectedLowPct,
       projectedHighPct: projection.projectedHighPct,
+      winRatePct: projection.winRatePct,
+      expectancyPct: projection.expectancyPct,
+      payoff: projection.payoff,
+      adversePct: projection.adversePct,
+      favorablePct: projection.favorablePct,
       analogs: projection.analogs,
       eligible: !candidate.blocksRoom
         && projection.projectedGainPct != null
@@ -157,7 +196,7 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
   });
   return {
     horizonSessions: 5,
-    model: "mercury-analog-rank-v1",
+    model: "mercury-analog-rank-v2",
     considered: scored,
     picks: eligible.slice(0, cap),
   };

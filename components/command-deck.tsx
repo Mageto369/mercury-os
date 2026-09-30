@@ -38,6 +38,14 @@ type PaperBook = {
   } | null;
 };
 
+type AlpacaPaperStatus = 'unconfigured' | 'connected' | 'refused' | 'unreachable';
+
+type AlpacaPaper = {
+  status?: AlpacaPaperStatus;
+  account?: { buyingPower?: number | null; cash?: number | null } | null;
+  positionCount?: number;
+} | null;
+
 type Warehouse = {
   liveSecurities?: number;
   referenceOpportunities?: number;
@@ -69,6 +77,30 @@ function compact(value: number | null | undefined) {
   return String(Math.round(value));
 }
 
+function alpacaLine(snapshot: AlpacaPaper) {
+  const status = snapshot?.status;
+  switch (status) {
+    case undefined:
+      return 'Alpaca paper account …';
+    case 'unconfigured':
+      return 'Alpaca paper account is not connected. Keys stay on the server.';
+    case 'connected': {
+      const buyingPower = snapshot?.account?.buyingPower;
+      const count = snapshot?.positionCount ?? 0;
+      const power = buyingPower == null ? 'buying power unread' : `${money(buyingPower)} buying power`;
+      return `Alpaca paper · ${power} · ${count} position${count === 1 ? '' : 's'}. Local orders stay in this book.`;
+    }
+    case 'refused':
+      return 'Alpaca paper host required. Local orders stay in this book.';
+    case 'unreachable':
+      return 'Alpaca paper account unread. Local orders stay in this book.';
+    default: {
+      const unexpected: never = status;
+      return String(unexpected);
+    }
+  }
+}
+
 function Meter({ value, tone = 'blue' }: { value: number; tone?: 'blue' | 'amber' | 'red' }) {
   const width = Math.max(0, Math.min(100, value));
   return <span className={`deck-meter ${tone === 'blue' ? '' : tone}`} aria-hidden="true"><i style={{ width: `${width}%` }} /></span>;
@@ -95,16 +127,19 @@ export function CommandDeck({
 }) {
   const [warehouse, setWarehouse] = useState<Warehouse | null>(null);
   const [book, setBook] = useState<PaperBook | null>(null);
+  const [alpaca, setAlpaca] = useState<AlpacaPaper>(null);
 
   useEffect(() => {
     let active = true;
     void Promise.all([
       fetch('/api/health', { cache: 'no-store' }).then((response) => response.json()).catch(() => null),
       fetch('/api/paper/terminal', { cache: 'no-store' }).then((response) => response.json()).catch(() => null),
-    ]).then(([health, paper]) => {
+      fetch('/api/paper/alpaca', { cache: 'no-store' }).then((response) => response.json()).catch(() => null),
+    ]).then(([health, paper, paperAccount]) => {
       if (!active) return;
       setWarehouse(health?.warehouse ?? null);
       setBook(paper ?? null);
+      setAlpaca(paperAccount ?? null);
     });
     return () => { active = false; };
   }, [ranked.length, regime?.regime]);
@@ -225,6 +260,7 @@ export function CommandDeck({
           {!positions.length && <span>No virtual positions</span>}
         </div>
         <div className="deck-lock"><span>Open {book?.summary?.open ?? 0} · rejected {book?.summary?.rejected ?? 0}</span><b className="warn">CAPITAL LOCKED</b></div>
+        <div className="deck-lock"><span>{alpacaLine(alpaca)}</span><b className="warn">READ ONLY</b></div>
       </article>
     </div>
   </section>;

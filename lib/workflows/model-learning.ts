@@ -4,6 +4,8 @@ import { getDb } from '@/lib/db';
 import { routeOperationalAlert } from '@/lib/alerts/router';
 import { replayRuns } from '@/lib/db/ops-schema';
 import { decisionLogs, opportunities, securities, systemEvents } from '@/lib/db/schema';
+import { recordResearchScorecard } from '@/lib/market/research-memory';
+import type { ResearchScorecard } from '@/lib/market/research-scorecard';
 
 export interface LearningMetric {
   name: string;
@@ -16,6 +18,7 @@ export interface ModelLearningResult {
   decisionsReviewed: number;
   metrics: LearningMetric[];
   driftDetected: boolean;
+  researchScorecard: ResearchScorecard | null;
 }
 
 export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
@@ -108,11 +111,20 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
     completedAt: new Date(),
   }).where(eq(replayRuns.id, replayRunId));
 
+  let researchScorecard: ResearchScorecard | null = null;
+  try {
+    const recorded = await recordResearchScorecard();
+    researchScorecard = recorded.ok ? recorded.scorecard : null;
+  } catch {
+    researchScorecard = null;
+  }
+
   return {
     replayRunId,
     opportunitiesReviewed: opportunityRows.length,
     decisionsReviewed: decisionRows.length,
     metrics,
     driftDetected,
+    researchScorecard,
   };
 }

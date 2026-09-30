@@ -7,6 +7,7 @@ import { loadDailyHistory } from '@/lib/market/daily-history';
 import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
 import { rankDailyConsiderations } from '@/lib/market/daily-rank';
+import { rememberRankedBook } from '@/lib/market/research-memory';
 import { sessionRisk } from '@/lib/market/quant-stats';
 import { collectForwardAnalogs, summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
@@ -324,6 +325,13 @@ export async function GET() {
     });
 
     const evidence = summarizeOpportunityEvidence(rankedBook.map((row) => row.modelVersion));
+    let researchMemory: Awaited<ReturnType<typeof rememberRankedBook>> | { ok: false; reason: string; capitalExecutionEnabled: false };
+    try {
+      researchMemory = await rememberRankedBook({ regime: regime.regime, rows: rankedBook });
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String((error as { code?: unknown }).code ?? '') : '';
+      researchMemory = { ok: false, reason: code || 'research_memory_failed', capitalExecutionEnabled: false };
+    }
     return NextResponse.json({
       generatedAt: new Date().toISOString(),
       mode: 'warehouse',
@@ -343,6 +351,7 @@ export async function GET() {
         considered: rows.length,
         admitted: screened.length,
       },
+      researchMemory,
       opportunities: rankedBook,
     });
   } catch (error) {

@@ -1,4 +1,5 @@
 import { getSql } from '@/lib/db';
+import { ensureResearchMemory } from '@/lib/market/research-memory';
 
 export async function bootstrapIntelligenceLab() {
   const sql = getSql();
@@ -68,6 +69,7 @@ export async function bootstrapIntelligenceLab() {
     observed_at timestamptz NOT NULL DEFAULT now(), resolved_at timestamptz
   )`;
   await sql`CREATE INDEX IF NOT EXISTS risk_incident_time_idx ON risk_incidents(severity, observed_at)`;
+  await ensureResearchMemory();
 
   return { ok: true as const, initializedAt: new Date().toISOString() };
 }

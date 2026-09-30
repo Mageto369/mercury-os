@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { runSupervisor } from "@/lib/agents/supervisor";
 import { routeOperationalAlert } from "@/lib/alerts/router";
+import { refreshResearchLabels } from "@/lib/market/research-memory";
 import { matureOpportunityOutcomes } from "@/lib/performance/outcomes";
 import { refreshSourceReputation } from "@/lib/research/source-reputation";
 import { buildShadowPortfolio } from "@/lib/portfolio/shadow-portfolio";
@@ -276,6 +277,9 @@ async function runIntelligenceCycle(force = false) {
   let outcomeMaturation:
     | Awaited<ReturnType<typeof matureOpportunityOutcomes>>
     | { ok: false; reason: string };
+  let researchLabels:
+    | Awaited<ReturnType<typeof refreshResearchLabels>>
+    | { ok: false; reason: string; labeled: number; capitalExecutionEnabled: false };
   let signalAttribution:
     | Awaited<ReturnType<typeof runSignalAttribution>>
     | { ok: false; reason: string };
@@ -295,6 +299,17 @@ async function runIntelligenceCycle(force = false) {
       ok: false,
       reason:
         error instanceof Error ? error.message : "outcome_maturation_failed",
+    };
+  }
+  try {
+    researchLabels = await refreshResearchLabels();
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+    researchLabels = {
+      ok: false,
+      reason: code || "research_label_failed",
+      labeled: 0,
+      capitalExecutionEnabled: false,
     };
   }
   try {
@@ -401,6 +416,7 @@ async function runIntelligenceCycle(force = false) {
     entityGraph,
     deepIntelligence,
     outcomeMaturation,
+    researchLabels,
     signalAttribution,
     sourceReputation,
     shadowPortfolio,

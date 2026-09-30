@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { chooseChallenger, neighbors, nextKnob, splitSessions } from '../lib/market/rule-search.ts';
+import { chooseChallenger, neighbors, nextKnob, shadowAdoption, splitSessions } from '../lib/market/rule-search.ts';
 
 const seed = {
   version: 'v3-constants',
@@ -75,6 +75,7 @@ test('a thin sample does not score and does not advance the knob', () => {
   assert.equal(result.nextKnob, 'relativeVolume');
   assert.equal(result.card, null);
   assert.equal(result.promoted, false);
+  assert.equal(shadowAdoption(result).adopt, false);
 });
 
 test('no legal step advances the knob without scoring', () => {
@@ -114,9 +115,14 @@ test('holdout stays unread until train picks a step, and a holdout loss stays re
   assert.equal(result.nextKnob, 'extension');
   assert.equal(result.promoted, false);
   assert.equal(result.capitalExecutionEnabled, false);
+  const adoption = shadowAdoption(result);
+  assert.equal(adoption.adopt, false);
+  assert.equal(adoption.role, 'challenger');
+  assert.equal(adoption.retirePrevious, false);
+  assert.equal(adoption.promotedToCapital, false);
 });
 
-test('a train step that wins the holdout is a challenger and is not promoted', () => {
+test('a holdout win replaces the shadow champion and does not unlock capital', () => {
   const result = chooseChallenger({
     champion: seed,
     knob: 'relativeVolume',
@@ -133,6 +139,14 @@ test('a train step that wins the holdout is a challenger and is not promoted', (
   assert.equal(result.reason, 'candidate');
   assert.equal(result.promoted, false);
   assert.equal(result.card.edgeFloor, null);
+  const adoption = shadowAdoption(result);
+  assert.equal(adoption.adopt, true);
+  assert.equal(adoption.role, 'champion');
+  assert.equal(adoption.status, 'shadow');
+  assert.equal(adoption.retirePrevious, true);
+  assert.equal(adoption.capitalExecutionEnabled, false);
+  assert.equal(adoption.brokerAuthority, false);
+  assert.equal(adoption.promotedToCapital, false);
 });
 
 test('nineteen holdout slots, a worse path, and worse calibration reject the step', () => {

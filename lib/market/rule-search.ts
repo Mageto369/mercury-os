@@ -1,4 +1,4 @@
-/** One knob per night. The holdout is scored only after a train step is chosen, and nothing here promotes a card. */
+/** One knob per night. The holdout is scored only after a train step is chosen. A winner may replace the shadow champion; capital stays off. */
 
 export const SEARCH_KNOBS = [
   "relativeVolume",
@@ -85,6 +85,30 @@ export interface ChallengerSearch<T> {
   card: T | null;
   train: { champion: SearchScore | null; challenger: SearchScore | null };
   holdout: { champion: SearchScore | null; challenger: SearchScore | null };
+}
+
+/** Shadow registry swap. `promotedToCapital` stays false; this is not a production promotion. */
+export interface ShadowAdoption {
+  adopt: boolean;
+  role: "champion" | "challenger";
+  status: "shadow";
+  retirePrevious: boolean;
+  capitalExecutionEnabled: false;
+  brokerAuthority: false;
+  promotedToCapital: false;
+}
+
+export function shadowAdoption<T>(search: ChallengerSearch<T>): ShadowAdoption {
+  const adopt = search.status === "candidate" && search.card != null && search.capitalExecutionEnabled === false;
+  return {
+    adopt,
+    role: adopt ? "champion" : "challenger",
+    status: "shadow",
+    retirePrevious: adopt,
+    capitalExecutionEnabled: false,
+    brokerAuthority: false,
+    promotedToCapital: false,
+  };
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;

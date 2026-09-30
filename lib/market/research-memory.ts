@@ -9,7 +9,7 @@ import { labelForwardSession } from "@/lib/market/research-label";
 import { DELAYED_REFERENCE_MODEL } from "@/lib/market/research-quotes";
 import { scoreResearchBook, type ResearchScorecard, type ScoredResearchRow } from "@/lib/market/research-scorecard";
 import { cardHash, cardWithinBounds, RESEARCH_CARD_KEY, RESEARCH_CARD_VERSION, SEED_RULE_CARD, type ResearchRuleCard } from "@/lib/market/rule-card";
-import { chooseChallenger, isSearchKnob, MIN_LABELED_SESSIONS, type ChallengerSearch, type SearchKnob, type SearchScore } from "@/lib/market/rule-search";
+import { chooseChallenger, isSearchKnob, MIN_LABELED_SESSIONS, shadowAdoption, type ChallengerSearch, type SearchKnob, type SearchScore } from "@/lib/market/rule-search";
 
 export interface ResearchMemoryResult {
   ok: true;
@@ -256,12 +256,11 @@ export async function refreshResearchLabels(limit = 200) {
 /** Journal the book the command page just ranked. The paper engine does not read these rows. */
 export async function rememberRankedBook(input: { regime: string | null; rows: RememberRow[] }): Promise<ResearchMemoryResult> {
   const sql = getSql();
-  const hash = cardHash(SEED_RULE_CARD);
   if (!sql) {
     return {
       ok: true,
       cardVersion: RESEARCH_CARD_VERSION,
-      cardHash: hash,
+      cardHash: cardHash(SEED_RULE_CARD),
       decisions: 0,
       labels: 0,
       promoted: false,
@@ -270,7 +269,9 @@ export async function rememberRankedBook(input: { regime: string | null; rows: R
     };
   }
   await ensureResearchMemory();
-  const card = { version: RESEARCH_CARD_VERSION, hash, expectancyFloorPct: SEED_RULE_CARD.expectancyFloorPct };
+  const stored = await loadStoredRuleCard();
+  const active = viewFromCard(stored.card, stored.source);
+  const card = { version: active.version, hash: active.hash, expectancyFloorPct: stored.card.expectancyFloorPct };
   const decisions = input.rows.flatMap((row) => {
     const decision = buildResearchDecision({
       symbol: String(row.input.symbol ?? ""),
@@ -296,8 +297,8 @@ export async function rememberRankedBook(input: { regime: string | null; rows: R
   const labels = await refreshResearchLabels();
   return {
     ok: true,
-    cardVersion: RESEARCH_CARD_VERSION,
-    cardHash: hash,
+    cardVersion: active.version,
+    cardHash: active.hash,
     decisions: written,
     labels: labels.labeled,
     promoted: false,
@@ -407,6 +408,7 @@ export async function recordResearchScorecard() {
   const sql = getSql();
   if (!sql) return { ok: false as const, reason: "database_not_configured" as const, scorecard: null };
   await ensureResearchMemory();
+  const stored = await loadStoredRuleCard();
   const rows = await sql<{
     session_date: Date | string;
     eligible: boolean;
@@ -422,7 +424,7 @@ export async function recordResearchScorecard() {
            l.forward_5_pct, l.adverse_pct AS realized_adverse
     FROM research_decisions d
     LEFT JOIN research_labels l ON l.decision_id = d.id
-    WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+    WHERE d.card_version = ${stored.card.version}
   `;
   const scored: ScoredResearchRow[] = rows.map((row) => ({
     sessionDate: asDay(row.session_date),
@@ -520,6 +522,7 @@ export async function challengerReadiness(): Promise<ChallengerReadiness | null>
         FROM research_decisions d
         INNER JOIN research_labels l ON l.decision_id = d.id
         WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+          OR d.card_version LIKE 'challenger-%'
       `,
       sql<{ metrics: unknown }[]>`
         SELECT metrics
@@ -546,7 +549,7 @@ export async function challengerReadiness(): Promise<ChallengerReadiness | null>
   }
 }
 
-async function loadLearnedRows() {
+async function loadLearnedRows(championVersion: string) {
   const sql = getSql();
   if (!sql) return [];
   const rows = await sql<{
@@ -563,11 +566,14 @@ async function loadLearnedRows() {
     favorable_pct: string | null;
     target_first: boolean | null;
   }[]>`
-    SELECT d.session_date, d.symbol, d.return_5, d.relative_volume, d.extension_20, d.close_location,
+    SELECT DISTINCT ON (d.session_date, d.symbol)
+           d.session_date, d.symbol, d.return_5, d.relative_volume, d.extension_20, d.close_location,
            d.blocks_room, d.social_hype, l.forward_5_pct, l.adverse_pct, l.favorable_pct, l.target_first
     FROM research_decisions d
     LEFT JOIN research_labels l ON l.decision_id = d.id
     WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+       OR d.card_version LIKE 'challenger-%'
+    ORDER BY d.session_date, d.symbol, (d.card_version = ${championVersion}) DESC, d.observed_at DESC
   `;
   return rows.flatMap((row) => {
     const return5Pct = num(row.return_5);
@@ -671,7 +677,7 @@ function gradeCard(card: ResearchRuleCard, dates: readonly string[], rows: Learn
   };
 }
 
-/** Replay grades one neighbor. A holdout win stays a challenger and the champion row is left alone. */
+/** Replay grades one neighbor. A holdout win replaces the shadow champion. Capital stays off. */
 export async function runChallengerSearch() {
   const sql = getSql();
   if (!sql) return { ok: false as const, reason: "database_not_configured" as const, search: null, promoted: false as const, capitalExecutionEnabled: false as const };
@@ -682,11 +688,12 @@ export async function runChallengerSearch() {
     FROM research_decisions d
     INNER JOIN research_labels l ON l.decision_id = d.id
     WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+       OR d.card_version LIKE 'challenger-%'
   `;
   const sessionDates = labeled.map((row) => asDay(row.session_date)).filter(Boolean);
   const readiness = await challengerReadiness();
   const knob = readiness?.nextKnob ?? "relativeVolume";
-  const rows = sessionDates.length >= MIN_LABELED_SESSIONS ? await loadLearnedRows() : [];
+  const rows = sessionDates.length >= MIN_LABELED_SESSIONS ? await loadLearnedRows(stored.card.version) : [];
   const search: ChallengerSearch<ResearchRuleCard> = chooseChallenger({
     champion: stored.card,
     knob,
@@ -694,31 +701,83 @@ export async function runChallengerSearch() {
     accept: cardWithinBounds,
     score: (card, dates) => gradeCard(card, dates, rows),
   });
+  const adoption = shadowAdoption(search);
   const day = new Date().toISOString().slice(0, 10);
   let cardVersion: string | null = null;
-  if (search.card && (search.status === "candidate" || search.status === "rejected")) {
+  let shadowChampion = false;
+  if (search.card && (adoption.adopt || search.status === "rejected")) {
     const hashed = cardHash(search.card);
     cardVersion = `challenger-${search.knob}-${hashed}`;
     const manifest: ResearchRuleCard = { ...search.card, version: cardVersion };
-    await sql`
-      INSERT INTO model_registry (
-        id, model_key, version, role, status, strategy, regime, feature_manifest,
-        promotion_metrics, parent_version, created_at
-      ) VALUES (
-        ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
-        ${RESEARCH_CARD_KEY},
-        ${cardVersion},
-        'challenger',
-        'shadow',
-        'penny-analog-rank',
-        'all',
-        ${toJsonb(manifest)}::jsonb,
-        ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false })}::jsonb,
-        ${stored.card.version},
-        now()
-      )
-      ON CONFLICT (model_key, version) DO NOTHING
-    `;
+    if (!cardWithinBounds(manifest)) {
+      cardVersion = null;
+    } else if (adoption.adopt) {
+      const swapped = await sql<{ adopted: number }[]>`
+        WITH adopted AS (
+          INSERT INTO model_registry (
+            id, model_key, version, role, status, strategy, regime, feature_manifest,
+            promotion_metrics, parent_version, created_at, promoted_at
+          ) VALUES (
+            ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
+            ${RESEARCH_CARD_KEY},
+            ${cardVersion},
+            'champion',
+            'shadow',
+            'penny-analog-rank',
+            'all',
+            ${toJsonb(manifest)}::jsonb,
+            ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false, shadowChampion: true })}::jsonb,
+            ${stored.card.version},
+            now(),
+            now()
+          )
+          ON CONFLICT (model_key, version) DO UPDATE SET
+            role = 'champion',
+            status = 'shadow',
+            promoted_at = COALESCE(model_registry.promoted_at, now()),
+            retired_at = NULL,
+            feature_manifest = excluded.feature_manifest,
+            promotion_metrics = excluded.promotion_metrics,
+            parent_version = excluded.parent_version
+          WHERE model_registry.role <> 'champion' OR model_registry.retired_at IS NOT NULL
+          RETURNING version
+        ),
+        retired AS (
+          UPDATE model_registry
+          SET status = 'retired', retired_at = now()
+          WHERE model_key = ${RESEARCH_CARD_KEY}
+            AND role = 'champion'
+            AND status = 'shadow'
+            AND retired_at IS NULL
+            AND version <> ${cardVersion}
+            AND EXISTS (SELECT 1 FROM adopted)
+          RETURNING version
+        )
+        SELECT (SELECT count(*)::int FROM adopted) AS adopted
+      `;
+      shadowChampion = Number(swapped[0]?.adopted ?? 0) === 1;
+      if (!shadowChampion) throw new Error("shadow_champion_not_adopted");
+    } else {
+      await sql`
+        INSERT INTO model_registry (
+          id, model_key, version, role, status, strategy, regime, feature_manifest,
+          promotion_metrics, parent_version, created_at
+        ) VALUES (
+          ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
+          ${RESEARCH_CARD_KEY},
+          ${cardVersion},
+          'challenger',
+          'shadow',
+          'penny-analog-rank',
+          'all',
+          ${toJsonb(manifest)}::jsonb,
+          ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false })}::jsonb,
+          ${stored.card.version},
+          now()
+        )
+        ON CONFLICT (model_key, version) DO NOTHING
+      `;
+    }
   }
   await sql`
     INSERT INTO experiment_runs (
@@ -739,6 +798,7 @@ export async function runChallengerSearch() {
         reason: search.reason,
         status: search.status,
         promoted: false,
+        shadowChampion,
         capitalExecutionEnabled: false,
         evidenceClass: "delayed-reference",
         labeledSessions: sessionDates.length,
@@ -746,7 +806,7 @@ export async function runChallengerSearch() {
         train: search.train,
         holdout: search.holdout,
       })}::jsonb,
-      ${toJsonb({ teacher: "delayed-daily-5-session", holdoutUsedForPromotion: false, liveEvidence: false })}::jsonb,
+      ${toJsonb({ teacher: "delayed-daily-5-session", holdoutUsedForPromotion: shadowChampion, liveEvidence: false })}::jsonb,
       ${toJsonb({ capitalExecutionEnabled: false, brokerAuthority: false })}::jsonb,
       now(),
       now()

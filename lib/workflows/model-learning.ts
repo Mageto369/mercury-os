@@ -4,8 +4,10 @@ import { getDb } from '@/lib/db';
 import { routeOperationalAlert } from '@/lib/alerts/router';
 import { replayRuns } from '@/lib/db/ops-schema';
 import { decisionLogs, opportunities, securities, systemEvents } from '@/lib/db/schema';
-import { recordResearchScorecard } from '@/lib/market/research-memory';
+import { recordResearchScorecard, runChallengerSearch } from '@/lib/market/research-memory';
 import type { ResearchScorecard } from '@/lib/market/research-scorecard';
+import type { ChallengerSearch } from '@/lib/market/rule-search';
+import type { ResearchRuleCard } from '@/lib/market/rule-card';
 
 export interface LearningMetric {
   name: string;
@@ -19,6 +21,7 @@ export interface ModelLearningResult {
   metrics: LearningMetric[];
   driftDetected: boolean;
   researchScorecard: ResearchScorecard | null;
+  researchSearch: ChallengerSearch<ResearchRuleCard> | null;
 }
 
 export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
@@ -119,6 +122,14 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
     researchScorecard = null;
   }
 
+  let researchSearch: ChallengerSearch<ResearchRuleCard> | null = null;
+  try {
+    const searched = await runChallengerSearch();
+    researchSearch = searched.ok ? searched.search : null;
+  } catch {
+    researchSearch = null;
+  }
+
   return {
     replayRunId,
     opportunitiesReviewed: opportunityRows.length,
@@ -126,5 +137,6 @@ export async function runModelLearningWorkflow(): Promise<ModelLearningResult> {
     metrics,
     driftDetected,
     researchScorecard,
+    researchSearch,
   };
 }

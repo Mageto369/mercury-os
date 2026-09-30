@@ -7,7 +7,7 @@ import { loadDailyHistory } from '@/lib/market/daily-history';
 import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
 import { rankDailyConsiderations } from '@/lib/market/daily-rank';
-import { loadChampionCard, rememberRankedBook } from '@/lib/market/research-memory';
+import { challengerReadiness, loadChampionCard, rememberRankedBook } from '@/lib/market/research-memory';
 import { sessionRisk } from '@/lib/market/quant-stats';
 import { collectForwardAnalogs, summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
@@ -345,6 +345,7 @@ export async function GET() {
         horizonSessions: dailyRank.horizonSessions,
         model: dailyRank.model,
         card: { version: champion.version, hash: champion.hash, source: champion.source },
+        search: await challengerReadiness(),
         picks: dailyRank.picks,
       },
       pennyScreen: {

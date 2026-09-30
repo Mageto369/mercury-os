@@ -1,14 +1,15 @@
 import { getSql } from "@/lib/db";
 import { toJsonb } from "@/lib/db/json";
+import { rankDailyConsiderations, type AnalogObservation, type RankCandidate, type RankKnobs } from "@/lib/market/daily-rank";
 import { loadDailyHistory } from "@/lib/market/daily-history";
+import { scoreRiseRoom, type RiseBounds } from "@/lib/market/nasdaq-history";
 import { observedCatalystScore, type PricePush } from "@/lib/market/price-push";
-import { buildResearchDecision, type JournalProjection, type ResearchDecision } from "@/lib/market/research-journal";
+import { buildResearchDecision, researchGatePass, type JournalProjection, type ResearchDecision } from "@/lib/market/research-journal";
 import { labelForwardSession } from "@/lib/market/research-label";
 import { DELAYED_REFERENCE_MODEL } from "@/lib/market/research-quotes";
 import { scoreResearchBook, type ResearchScorecard, type ScoredResearchRow } from "@/lib/market/research-scorecard";
-import type { RankKnobs } from "@/lib/market/daily-rank";
-import type { RiseBounds } from "@/lib/market/nasdaq-history";
 import { cardHash, cardWithinBounds, RESEARCH_CARD_KEY, RESEARCH_CARD_VERSION, SEED_RULE_CARD, type ResearchRuleCard } from "@/lib/market/rule-card";
+import { chooseChallenger, isSearchKnob, MIN_LABELED_SESSIONS, type ChallengerSearch, type SearchKnob, type SearchScore } from "@/lib/market/rule-search";
 
 export interface ResearchMemoryResult {
   ok: true;
@@ -372,11 +373,10 @@ function viewFromCard(card: ResearchRuleCard, source: ActiveRuleCard["source"]):
   };
 }
 
-/** Champion card when the registry row is inside bounds. Otherwise the in-code seed. */
-export async function loadChampionCard(): Promise<ActiveRuleCard> {
-  const seed = viewFromCard(SEED_RULE_CARD, "seed");
+async function loadStoredRuleCard(): Promise<{ card: ResearchRuleCard; source: ActiveRuleCard["source"] }> {
+  const fallback = { card: SEED_RULE_CARD, source: "seed" as const };
   const sql = getSql();
-  if (!sql) return seed;
+  if (!sql) return fallback;
   try {
     const rows = await sql<{ version: string; feature_manifest: unknown }[]>`
       SELECT version, feature_manifest
@@ -389,11 +389,17 @@ export async function loadChampionCard(): Promise<ActiveRuleCard> {
       LIMIT 1
     `;
     const card = manifestCard(rows[0]?.feature_manifest);
-    if (!card || card.version !== rows[0]?.version) return seed;
-    return viewFromCard(card, "champion");
+    if (!card || card.version !== rows[0]?.version) return fallback;
+    return { card, source: "champion" };
   } catch {
-    return seed;
+    return fallback;
   }
+}
+
+/** Champion card when the registry row is inside bounds. Otherwise the in-code seed. */
+export async function loadChampionCard(): Promise<ActiveRuleCard> {
+  const stored = await loadStoredRuleCard();
+  return viewFromCard(stored.card, stored.source);
 }
 
 /** Store today's grade. A recorded scorecard still leaves the champion card unchanged. */
@@ -458,4 +464,301 @@ export async function recordResearchScorecard() {
       completed_at = now()
   `;
   return { ok: true as const, scorecard, promoted: false as const, capitalExecutionEnabled: false as const };
+}
+
+export interface ChallengerReadiness {
+  labeledSessions: number;
+  neededSessions: number;
+  nextKnob: SearchKnob;
+  status: "ready" | "insufficient";
+  promoted: false;
+  capitalExecutionEnabled: false;
+}
+
+interface LearnedRow {
+  sessionDate: string;
+  symbol: string;
+  return5Pct: number;
+  relativeVolume: number;
+  extension20Pct: number;
+  closeLocationPct: number;
+  blocksRoom: boolean;
+  socialHype: number | null;
+  forward5Pct: number | null;
+  adversePct: number | null;
+  favorablePct: number | null;
+  targetFirst: boolean | null;
+}
+
+function tri(value: unknown) {
+  if (value == null) return null;
+  if (value === true || value === "t" || value === "true") return true;
+  if (value === false || value === "f" || value === "false") return false;
+  return null;
+}
+
+function metricsRecord(value: unknown) {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+/** How many labeled sessions the next Replay search will see. Does not run the search. */
+export async function challengerReadiness(): Promise<ChallengerReadiness | null> {
+  const sql = getSql();
+  if (!sql) return null;
+  try {
+    await ensureResearchMemory();
+    const [counted, latest] = await Promise.all([
+      sql<{ sessions: number | string }[]>`
+        SELECT COUNT(DISTINCT d.session_date)::int AS sessions
+        FROM research_decisions d
+        INNER JOIN research_labels l ON l.decision_id = d.id
+        WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+      `,
+      sql<{ metrics: unknown }[]>`
+        SELECT metrics
+        FROM experiment_runs
+        WHERE model_key = ${RESEARCH_CARD_KEY}
+          AND experiment_type = 'research-challenger'
+        ORDER BY completed_at DESC NULLS LAST
+        LIMIT 1
+      `,
+    ]);
+    const labeledSessions = num(counted[0]?.sessions) ?? 0;
+    const next = metricsRecord(latest[0]?.metrics)?.nextKnob;
+    const nextKnob: SearchKnob = isSearchKnob(next) ? next : "relativeVolume";
+    return {
+      labeledSessions,
+      neededSessions: MIN_LABELED_SESSIONS,
+      nextKnob,
+      status: labeledSessions >= MIN_LABELED_SESSIONS ? "ready" : "insufficient",
+      promoted: false,
+      capitalExecutionEnabled: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadLearnedRows() {
+  const sql = getSql();
+  if (!sql) return [];
+  const rows = await sql<{
+    session_date: Date | string;
+    symbol: string;
+    return_5: string | null;
+    relative_volume: string | null;
+    extension_20: string | null;
+    close_location: string | null;
+    blocks_room: boolean;
+    social_hype: string | null;
+    forward_5_pct: string | null;
+    adverse_pct: string | null;
+    favorable_pct: string | null;
+    target_first: boolean | null;
+  }[]>`
+    SELECT d.session_date, d.symbol, d.return_5, d.relative_volume, d.extension_20, d.close_location,
+           d.blocks_room, d.social_hype, l.forward_5_pct, l.adverse_pct, l.favorable_pct, l.target_first
+    FROM research_decisions d
+    LEFT JOIN research_labels l ON l.decision_id = d.id
+    WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+  `;
+  return rows.flatMap((row) => {
+    const return5Pct = num(row.return_5);
+    const relativeVolume = num(row.relative_volume);
+    const extension20Pct = num(row.extension_20);
+    const closeLocationPct = num(row.close_location);
+    if (return5Pct == null || relativeVolume == null || extension20Pct == null || closeLocationPct == null) return [];
+    const learned: LearnedRow = {
+      sessionDate: asDay(row.session_date),
+      symbol: String(row.symbol).toUpperCase(),
+      return5Pct,
+      relativeVolume,
+      extension20Pct,
+      closeLocationPct,
+      blocksRoom: flag(row.blocks_room),
+      socialHype: num(row.social_hype),
+      forward5Pct: num(row.forward_5_pct),
+      adversePct: num(row.adverse_pct),
+      favorablePct: num(row.favorable_pct),
+      targetFirst: tri(row.target_first),
+    };
+    return learned.sessionDate ? [learned] : [];
+  });
+}
+
+function gradeCard(card: ResearchRuleCard, dates: readonly string[], rows: LearnedRow[]): SearchScore {
+  const active = viewFromCard(card, "seed");
+  const wanted = new Set(dates);
+  const scored: ScoredResearchRow[] = [];
+  for (const sessionDate of [...wanted].sort()) {
+    const candidates: RankCandidate[] = [];
+    const dayRows: Array<{ row: LearnedRow; rawRoom: boolean }> = [];
+    for (const row of rows) {
+      if (row.sessionDate !== sessionDate) continue;
+      const rise = scoreRiseRoom(row, active.rise);
+      if (rise.score == null) continue;
+      dayRows.push({ row, rawRoom: rise.room });
+      candidates.push({
+        symbol: row.symbol,
+        asOf: sessionDate,
+        blocksRoom: row.blocksRoom,
+        socialHype: row.socialHype,
+        setup: {
+          return5Pct: row.return5Pct,
+          relativeVolume: row.relativeVolume,
+          extension20Pct: row.extension20Pct,
+          closeLocationPct: row.closeLocationPct,
+          room: rise.room && !row.blocksRoom,
+          riseScore: rise.score,
+        },
+      });
+    }
+    const analogs: AnalogObservation[] = [];
+    for (const row of rows) {
+      if (!(row.sessionDate < sessionDate) || row.forward5Pct == null) continue;
+      const rise = scoreRiseRoom(row, active.rise);
+      if (rise.score == null) continue;
+      analogs.push({
+        symbol: row.symbol,
+        date: row.sessionDate,
+        return5Pct: row.return5Pct,
+        relativeVolume: row.relativeVolume,
+        extension20Pct: row.extension20Pct,
+        closeLocationPct: row.closeLocationPct,
+        room: rise.room,
+        riseScore: rise.score,
+        forward5Pct: row.forward5Pct,
+        adversePct: row.adversePct,
+        favorablePct: row.favorablePct,
+        targetFirst: row.targetFirst,
+      });
+    }
+    const ranked = rankDailyConsiderations(candidates, analogs, 10, active.rank);
+    const bySymbol = new Map(ranked.considered.map((row) => [row.symbol, row]));
+    for (const { row, rawRoom } of dayRows) {
+      const considered = bySymbol.get(row.symbol);
+      scored.push({
+        sessionDate,
+        eligible: considered?.eligible ?? false,
+        rank: considered?.rank ?? null,
+        expectancyPct: considered?.expectancyPct ?? null,
+        room: considered?.room ?? false,
+        blocksRoom: row.blocksRoom,
+        gatePass: researchGatePass({
+          room: rawRoom,
+          blocksRoom: row.blocksRoom,
+          expectancyPct: considered?.expectancyPct ?? null,
+          floorPct: card.expectancyFloorPct,
+        }),
+        forward5Pct: row.forward5Pct,
+        realizedAdversePct: row.adversePct,
+      });
+    }
+  }
+  const book = scoreResearchBook(scored);
+  return {
+    tenSlots: book.tenSlots,
+    selectionPct: book.selectionPct,
+    tenAdversePct: book.tenAdversePct,
+    calibrationPct: book.calibrationPct,
+  };
+}
+
+/** Replay grades one neighbor. A holdout win stays a challenger and the champion row is left alone. */
+export async function runChallengerSearch() {
+  const sql = getSql();
+  if (!sql) return { ok: false as const, reason: "database_not_configured" as const, search: null, promoted: false as const, capitalExecutionEnabled: false as const };
+  await ensureResearchMemory();
+  const stored = await loadStoredRuleCard();
+  const labeled = await sql<{ session_date: Date | string }[]>`
+    SELECT DISTINCT d.session_date
+    FROM research_decisions d
+    INNER JOIN research_labels l ON l.decision_id = d.id
+    WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+  `;
+  const sessionDates = labeled.map((row) => asDay(row.session_date)).filter(Boolean);
+  const readiness = await challengerReadiness();
+  const knob = readiness?.nextKnob ?? "relativeVolume";
+  const rows = sessionDates.length >= MIN_LABELED_SESSIONS ? await loadLearnedRows() : [];
+  const search: ChallengerSearch<ResearchRuleCard> = chooseChallenger({
+    champion: stored.card,
+    knob,
+    sessionDates,
+    accept: cardWithinBounds,
+    score: (card, dates) => gradeCard(card, dates, rows),
+  });
+  const day = new Date().toISOString().slice(0, 10);
+  let cardVersion: string | null = null;
+  if (search.card && (search.status === "candidate" || search.status === "rejected")) {
+    const hashed = cardHash(search.card);
+    cardVersion = `challenger-${search.knob}-${hashed}`;
+    const manifest: ResearchRuleCard = { ...search.card, version: cardVersion };
+    await sql`
+      INSERT INTO model_registry (
+        id, model_key, version, role, status, strategy, regime, feature_manifest,
+        promotion_metrics, parent_version, created_at
+      ) VALUES (
+        ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
+        ${RESEARCH_CARD_KEY},
+        ${cardVersion},
+        'challenger',
+        'shadow',
+        'penny-analog-rank',
+        'all',
+        ${toJsonb(manifest)}::jsonb,
+        ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false })}::jsonb,
+        ${stored.card.version},
+        now()
+      )
+      ON CONFLICT (model_key, version) DO NOTHING
+    `;
+  }
+  await sql`
+    INSERT INTO experiment_runs (
+      id, model_key, model_version, experiment_type, status, regime, sample_size,
+      metrics, leakage_checks, cost_assumptions, started_at, completed_at
+    ) VALUES (
+      ${`experiment:research-challenger:${day}`},
+      ${RESEARCH_CARD_KEY},
+      ${cardVersion ?? stored.card.version},
+      'research-challenger',
+      ${search.status},
+      'all',
+      ${sessionDates.length},
+      ${toJsonb({
+        teacher: "delayed-daily-5-session",
+        knob: search.knob,
+        nextKnob: search.nextKnob,
+        reason: search.reason,
+        status: search.status,
+        promoted: false,
+        capitalExecutionEnabled: false,
+        evidenceClass: "delayed-reference",
+        labeledSessions: sessionDates.length,
+        cardVersion,
+        train: search.train,
+        holdout: search.holdout,
+      })}::jsonb,
+      ${toJsonb({ teacher: "delayed-daily-5-session", holdoutUsedForPromotion: false, liveEvidence: false })}::jsonb,
+      ${toJsonb({ capitalExecutionEnabled: false, brokerAuthority: false })}::jsonb,
+      now(),
+      now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      model_version = excluded.model_version,
+      status = excluded.status,
+      sample_size = excluded.sample_size,
+      metrics = excluded.metrics,
+      leakage_checks = excluded.leakage_checks,
+      cost_assumptions = excluded.cost_assumptions,
+      completed_at = now()
+  `;
+  return { ok: true as const, search, promoted: false as const, capitalExecutionEnabled: false as const };
 }

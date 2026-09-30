@@ -109,28 +109,53 @@ function roomDistanceScore(extension20Pct: number) {
   return clampScore(100 - (extension20Pct - 8) * 4);
 }
 
+export interface RiseBounds {
+  relativeVolumeFloor: number;
+  extensionCapPct: number;
+  closeLocationFloor: number;
+  weightRoom: number;
+  weightHold: number;
+  weightTrend: number;
+  weightVolume: number;
+}
+
+/** Matches the seeded champion card. Callers that omit bounds keep this rise. */
+export const DEFAULT_RISE_BOUNDS: RiseBounds = {
+  relativeVolumeFloor: 1,
+  extensionCapPct: 15,
+  closeLocationFloor: 60,
+  weightRoom: 0.4,
+  weightHold: 0.25,
+  weightTrend: 0.2,
+  weightVolume: 0.15,
+};
+
 /** Higher when the rise is confirmed and the price is still near the 20-session average. */
 export function scoreRiseRoom(input: {
   return5Pct: number | null;
   relativeVolume: number | null;
   extension20Pct: number | null;
   closeLocationPct: number | null;
-}): RiseRoom {
+}, bounds: RiseBounds = DEFAULT_RISE_BOUNDS): RiseRoom {
   const { return5Pct, relativeVolume, extension20Pct, closeLocationPct } = input;
   if (return5Pct == null || relativeVolume == null || extension20Pct == null || closeLocationPct == null) {
     return { score: null, room: false };
   }
   const score = Math.round(
-    roomDistanceScore(extension20Pct) * 0.4
-    + closeLocationPct * 0.25
-    + trendScore(return5Pct) * 0.2
-    + clampScore(relativeVolume * 50) * 0.15,
+    roomDistanceScore(extension20Pct) * bounds.weightRoom
+    + closeLocationPct * bounds.weightHold
+    + trendScore(return5Pct) * bounds.weightTrend
+    + clampScore(relativeVolume * 50) * bounds.weightVolume,
   );
-  const room = return5Pct > 0 && relativeVolume > 1 && extension20Pct > 0 && extension20Pct < 15 && closeLocationPct >= 60;
+  const room = return5Pct > 0
+    && relativeVolume > bounds.relativeVolumeFloor
+    && extension20Pct > 0
+    && extension20Pct < bounds.extensionCapPct
+    && closeLocationPct >= bounds.closeLocationFloor;
   return { score, room };
 }
 
-export function summarizePriceHistory(price: number | null, bars: StoredDailyBar[]): SymbolPriceHistory {
+export function summarizePriceHistory(price: number | null, bars: StoredDailyBar[], bounds?: RiseBounds): SymbolPriceHistory {
   const ordered = [...bars].sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
   const closes = ordered.map((bar) => bar.close);
   if (!closes.length) return EMPTY_HISTORY;
@@ -153,7 +178,7 @@ export function summarizePriceHistory(price: number | null, bars: StoredDailyBar
     extension20Pct: extension20(price, closes),
     closeLocationPct: closeLocation(ordered, sameAsLast),
   };
-  return { ...summary, rise: scoreRiseRoom(summary) };
+  return { ...summary, rise: scoreRiseRoom(summary, bounds) };
 }
 
 export interface NasdaqDailyBar {
@@ -262,13 +287,13 @@ export function pathMarks(entry: number, futureCloses: number[]) {
 }
 
 /** Past sessions that already have a realized 5-session outcome. The latest sessions are excluded. */
-export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], horizon = 5): ForwardAnalog[] {
+export function collectForwardAnalogs(symbol: string, bars: StoredDailyBar[], horizon = 5, bounds?: RiseBounds): ForwardAnalog[] {
   const ordered = [...bars].sort((left, right) => left.date.localeCompare(right.date));
   const analogs: ForwardAnalog[] = [];
   for (let index = EXTENSION_SESSIONS - 1; index < ordered.length - horizon; index += 1) {
     const through = ordered.slice(0, index + 1);
     const price = through[through.length - 1]?.close ?? null;
-    const summary = summarizePriceHistory(price, through);
+    const summary = summarizePriceHistory(price, through, bounds);
     const future = ordered.slice(index + 1, index + 1 + horizon);
     const forward = percentChange(price, ordered[index + horizon]?.close ?? null);
     const marks = pathMarks(price ?? 0, future.map((bar) => bar.close));

@@ -6,7 +6,9 @@ import { buildResearchDecision, type JournalProjection, type ResearchDecision } 
 import { labelForwardSession } from "@/lib/market/research-label";
 import { DELAYED_REFERENCE_MODEL } from "@/lib/market/research-quotes";
 import { scoreResearchBook, type ResearchScorecard, type ScoredResearchRow } from "@/lib/market/research-scorecard";
-import { cardHash, RESEARCH_CARD_KEY, RESEARCH_CARD_VERSION, SEED_RULE_CARD } from "@/lib/market/rule-card";
+import type { RankKnobs } from "@/lib/market/daily-rank";
+import type { RiseBounds } from "@/lib/market/nasdaq-history";
+import { cardHash, cardWithinBounds, RESEARCH_CARD_KEY, RESEARCH_CARD_VERSION, SEED_RULE_CARD, type ResearchRuleCard } from "@/lib/market/rule-card";
 
 export interface ResearchMemoryResult {
   ok: true;
@@ -301,6 +303,97 @@ export async function rememberRankedBook(input: { regime: string | null; rows: R
     capitalExecutionEnabled: false,
     evidenceClass: "delayed-reference",
   };
+}
+
+export interface ActiveRuleCard {
+  version: string;
+  hash: string;
+  source: "champion" | "seed";
+  rank: RankKnobs;
+  rise: RiseBounds;
+}
+
+function finiteField(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function manifestCard(value: unknown): ResearchRuleCard | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.model !== "mercury-analog-rank-v3") return null;
+  if (row.evidenceClass !== "delayed-reference") return null;
+  if (row.capitalExecutionEnabled !== false) return null;
+  if (Number(row.horizonSessions) !== 5) return null;
+  const edge = row.edgeFloor == null ? null : finiteField(row.edgeFloor);
+  const card: ResearchRuleCard = {
+    version: String(row.version ?? ""),
+    model: "mercury-analog-rank-v3",
+    roomRelativeVolumeFloor: finiteField(row.roomRelativeVolumeFloor),
+    roomExtensionCapPct: finiteField(row.roomExtensionCapPct),
+    roomCloseLocationFloor: finiteField(row.roomCloseLocationFloor),
+    riseWeightRoom: finiteField(row.riseWeightRoom),
+    riseWeightHold: finiteField(row.riseWeightHold),
+    riseWeightTrend: finiteField(row.riseWeightTrend),
+    riseWeightVolume: finiteField(row.riseWeightVolume),
+    analogDistanceCap: finiteField(row.analogDistanceCap),
+    minAnalogs: finiteField(row.minAnalogs),
+    expectancyFloorPct: finiteField(row.expectancyFloorPct),
+    edgeFloor: edge != null && Number.isFinite(edge) ? edge : null,
+    strengthFloor: finiteField(row.strengthFloor),
+    horizonSessions: 5,
+    evidenceClass: "delayed-reference",
+    capitalExecutionEnabled: false,
+  };
+  return cardWithinBounds(card) ? card : null;
+}
+
+function viewFromCard(card: ResearchRuleCard, source: ActiveRuleCard["source"]): ActiveRuleCard {
+  return {
+    version: card.version,
+    hash: cardHash(card),
+    source,
+    rank: {
+      minAnalogs: card.minAnalogs,
+      distanceCap: card.analogDistanceCap,
+      strengthFloor: card.strengthFloor,
+      expectancyFloorPct: card.expectancyFloorPct,
+      edgeFloor: card.edgeFloor,
+    },
+    rise: {
+      relativeVolumeFloor: card.roomRelativeVolumeFloor,
+      extensionCapPct: card.roomExtensionCapPct,
+      closeLocationFloor: card.roomCloseLocationFloor,
+      weightRoom: card.riseWeightRoom / 100,
+      weightHold: card.riseWeightHold / 100,
+      weightTrend: card.riseWeightTrend / 100,
+      weightVolume: card.riseWeightVolume / 100,
+    },
+  };
+}
+
+/** Champion card when the registry row is inside bounds. Otherwise the in-code seed. */
+export async function loadChampionCard(): Promise<ActiveRuleCard> {
+  const seed = viewFromCard(SEED_RULE_CARD, "seed");
+  const sql = getSql();
+  if (!sql) return seed;
+  try {
+    const rows = await sql<{ version: string; feature_manifest: unknown }[]>`
+      SELECT version, feature_manifest
+      FROM model_registry
+      WHERE model_key = ${RESEARCH_CARD_KEY}
+        AND role = 'champion'
+        AND status = 'shadow'
+        AND retired_at IS NULL
+      ORDER BY promoted_at DESC NULLS LAST
+      LIMIT 1
+    `;
+    const card = manifestCard(rows[0]?.feature_manifest);
+    if (!card || card.version !== rows[0]?.version) return seed;
+    return viewFromCard(card, "champion");
+  } catch {
+    return seed;
+  }
 }
 
 /** Store today's grade. A recorded scorecard still leaves the champion card unchanged. */

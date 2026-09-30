@@ -95,6 +95,7 @@ type DailyPick = NonNullable<Opportunity['projection']>;
 type DailyRank = {
   horizonSessions: number;
   model: string;
+  card?: { version: string; hash: string; source: string } | null;
   picks: DailyPick[];
 } | null;
 
@@ -374,7 +375,10 @@ function compareOpportunities(left: Opportunity, right: Opportunity, sort: Oppor
 
 function DailyTen({ dailyRank, selected, setSelected }: { dailyRank: DailyRank; selected: string | null; setSelected: (symbol: string) => void }) {
   const picks = dailyRank?.picks ?? [];
-  return <div className="daily-ten"><div className="section-head"><div><h2>Daily 10</h2><p>Up to 10 names whose similar past sessions finished with a positive average, ordered by that average. Edge divides the average by the typical adverse path. Research estimate only.</p></div></div>{picks.length === 0 ? <p className="muted2">No penny has a positive average from similar past sessions.</p> : <div className="daily-ten-grid">{picks.map((pick) => <button key={pick.symbol} type="button" className={pick.symbol === selected ? 'selected' : ''} onClick={() => setSelected(pick.symbol)}><span>#{pick.rank}{pick.room ? ' · ROOM' : ''}</span><b>{pick.symbol}</b><strong className={changeClass(pick.expectancyPct)}>{formatChange(pick.expectancyPct)}</strong><small>median {formatChange(pick.projectedGainPct)} · {formatChange(pick.projectedLowPct)} to {formatChange(pick.projectedHighPct)}</small><small>{pick.winRatePct == null ? '—' : `${Math.round(pick.winRatePct)}% win`} · {pick.targetFirstPct == null ? '—' : `${Math.round(pick.targetFirstPct)}% target first`}</small><small>edge {pick.edge == null ? '—' : `${pick.edge.toFixed(2)}×`} · {pick.analogs} sessions</small></button>)}</div>}</div>;
+  const cardLabel = dailyRank?.card?.version
+    ? `${dailyRank.card.source === 'champion' ? 'Champion' : 'In-code'} card ${dailyRank.card.version}. `
+    : '';
+  return <div className="daily-ten"><div className="section-head"><div><h2>Daily 10</h2><p>{cardLabel}Up to 10 names whose similar past sessions finished with a positive average, ordered by that average. Edge divides the average by the typical adverse path. Research estimate only.</p></div></div>{picks.length === 0 ? <p className="muted2">No penny has a positive average from similar past sessions.</p> : <div className="daily-ten-grid">{picks.map((pick) => <button key={pick.symbol} type="button" className={pick.symbol === selected ? 'selected' : ''} onClick={() => setSelected(pick.symbol)}><span>#{pick.rank}{pick.room ? ' · ROOM' : ''}</span><b>{pick.symbol}</b><strong className={changeClass(pick.expectancyPct)}>{formatChange(pick.expectancyPct)}</strong><small>median {formatChange(pick.projectedGainPct)} · {formatChange(pick.projectedLowPct)} to {formatChange(pick.projectedHighPct)}</small><small>{pick.winRatePct == null ? '—' : `${Math.round(pick.winRatePct)}% win`} · {pick.targetFirstPct == null ? '—' : `${Math.round(pick.targetFirstPct)}% target first`}</small><small>edge {pick.edge == null ? '—' : `${pick.edge.toFixed(2)}×`} · {pick.analogs} sessions</small></button>)}</div>}</div>;
 }
 
 function BuyGateStrip({ ranked, setSelected }: { ranked: Opportunity[]; setSelected: (symbol: string) => void }) {

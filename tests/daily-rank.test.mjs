@@ -127,3 +127,29 @@ test('a losing average stays off the list and a tighter adverse path wins an exp
   assert.equal(loser.eligible, false);
   assert.equal(loser.edge, null);
 });
+
+test('the seeded knobs match the default rank and a higher expectancy floor drops the thinner name', () => {
+  const modest = setup({ return5Pct: 4, riseScore: 62 });
+  const strong = setup({ return5Pct: 30, riseScore: 62 });
+  const candidates = [
+    { symbol: 'MODEST', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: modest },
+    { symbol: 'STRONG', asOf: '2026-09-28', blocksRoom: false, socialHype: null, setup: strong },
+  ];
+  const analogs = [
+    ...Array.from({ length: 8 }, (_, index) => analog(`M${index}`, 0.5, modest, `2026-03-${String(index + 1).padStart(2, '0')}`)),
+    ...cluster('H', 8, 2, strong),
+  ];
+  const implicit = rankDailyConsiderations(candidates, analogs);
+  const seeded = rankDailyConsiderations(candidates, analogs, 10, {
+    minAnalogs: 8,
+    distanceCap: 1.35,
+    strengthFloor: 50,
+    expectancyFloorPct: 0,
+    edgeFloor: null,
+  });
+  assert.deepEqual(seeded.picks.map((pick) => [pick.symbol, pick.expectancyPct, pick.rank]), implicit.picks.map((pick) => [pick.symbol, pick.expectancyPct, pick.rank]));
+  const raised = rankDailyConsiderations(candidates, analogs, 10, { expectancyFloorPct: 1 });
+  assert.deepEqual(raised.picks.map((pick) => pick.symbol), ['STRONG']);
+  assert.equal(raised.considered.find((row) => row.symbol === 'MODEST').eligible, false);
+  assert.equal(rankDailyConsiderations(candidates, analogs, 10, { minAnalogs: 12 }).picks.length, 0);
+});

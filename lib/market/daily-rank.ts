@@ -58,6 +58,33 @@ const DISTANCE_CAP = 1.35;
 const HYPE_FLOOR = 70;
 const STRENGTH_FLOOR = 50;
 
+export interface RankKnobs {
+  minAnalogs: number;
+  distanceCap: number;
+  strengthFloor: number;
+  expectancyFloorPct: number;
+  edgeFloor: number | null;
+}
+
+/** Matches the seeded champion card. Omitting knobs keeps this rank. */
+export const DEFAULT_RANK_KNOBS: RankKnobs = {
+  minAnalogs: MIN_ANALOGS,
+  distanceCap: DISTANCE_CAP,
+  strengthFloor: STRENGTH_FLOOR,
+  expectancyFloorPct: 0,
+  edgeFloor: null,
+};
+
+function resolveKnobs(knobs?: Partial<RankKnobs>): RankKnobs {
+  return {
+    minAnalogs: knobs?.minAnalogs ?? DEFAULT_RANK_KNOBS.minAnalogs,
+    distanceCap: knobs?.distanceCap ?? DEFAULT_RANK_KNOBS.distanceCap,
+    strengthFloor: knobs?.strengthFloor ?? DEFAULT_RANK_KNOBS.strengthFloor,
+    expectancyFloorPct: knobs?.expectancyFloorPct ?? DEFAULT_RANK_KNOBS.expectancyFloorPct,
+    edgeFloor: knobs?.edgeFloor === undefined ? DEFAULT_RANK_KNOBS.edgeFloor : knobs.edgeFloor,
+  };
+}
+
 function clamp(value: number) {
   return Math.max(0, Math.min(100, value));
 }
@@ -119,7 +146,7 @@ function edgeRatio(expectancyPct: number | null, adversePct: number | null) {
   return round2(expectancyPct / Math.abs(adversePct));
 }
 
-function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
+function projectGain(candidate: RankCandidate, analogs: AnalogObservation[], knobs: RankKnobs) {
   const nearest = analogs
     .filter((analog) => !(analog.symbol === candidate.symbol && analog.date === candidate.asOf))
     .map((analog) => ({
@@ -130,7 +157,7 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
       targetFirst: analog.targetFirst,
       distance: distance(candidate.setup, analog),
     }))
-    .filter((analog) => analog.distance <= DISTANCE_CAP)
+    .filter((analog) => analog.distance <= knobs.distanceCap)
     .sort((left, right) => left.distance - right.distance || left.symbol.localeCompare(right.symbol));
   const used = new Map<string, number>();
   const chosen: Array<{ gain: number; adverse: number | null | undefined; favorable: number | null | undefined; targetFirst: boolean | null | undefined }> = [];
@@ -141,7 +168,7 @@ function projectGain(candidate: RankCandidate, analogs: AnalogObservation[]) {
     chosen.push(analog);
     if (chosen.length >= MAX_ANALOGS) break;
   }
-  if (chosen.length < MIN_ANALOGS) {
+  if (chosen.length < knobs.minAnalogs) {
     return {
       projectedGainPct: null,
       projectedLowPct: null,
@@ -186,10 +213,11 @@ function finiteSetup(setup: SetupFeatures) {
 }
 
 /** Rank names to consider. A name stays off the list unless similar past sessions finished with a positive average. */
-export function rankDailyConsiderations(candidates: RankCandidate[], analogs: AnalogObservation[], limit = 10): DailyRank {
+export function rankDailyConsiderations(candidates: RankCandidate[], analogs: AnalogObservation[], limit = 10, knobs?: Partial<RankKnobs>): DailyRank {
   const cap = Math.max(1, Math.min(10, limit));
+  const resolved = resolveKnobs(knobs);
   const scored = candidates.filter((candidate) => finiteSetup(candidate.setup)).map((candidate) => {
-    const projection = projectGain(candidate, analogs);
+    const projection = projectGain(candidate, analogs, resolved);
     return {
       rank: null as number | null,
       symbol: candidate.symbol,
@@ -210,8 +238,9 @@ export function rankDailyConsiderations(candidates: RankCandidate[], analogs: An
       eligible: !candidate.blocksRoom
         && projection.projectedGainPct != null
         && projection.expectancyPct != null
-        && projection.expectancyPct > 0
-        && (candidate.setup.riseScore >= STRENGTH_FLOOR || candidate.setup.room),
+        && projection.expectancyPct > resolved.expectancyFloorPct
+        && (resolved.edgeFloor == null || (projection.edge != null && projection.edge >= resolved.edgeFloor))
+        && (candidate.setup.riseScore >= resolved.strengthFloor || candidate.setup.room),
     };
   });
   const eligible = scored

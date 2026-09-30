@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectForwardAnalogs, parseNasdaqHistoricalBars, pathMarks, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
+import { collectForwardAnalogs, DEFAULT_RISE_BOUNDS, parseNasdaqHistoricalBars, pathMarks, scoreRiseRoom, summarizePriceHistory } from '../lib/market/nasdaq-history.ts';
 
 test('nasdaq historical text rows become oldest-first daily bars', () => {
   const bars = parseNasdaqHistoricalBars({
@@ -99,6 +99,9 @@ test('a rise still near the 20-session average outranks a stretched gain', () =>
   assert.ok(room.score > stretched.score);
   assert.ok(stretched.score > below.score);
   assert.deepEqual(missing, { score: null, room: false });
+  const same = { return5Pct: 4.06, relativeVolume: 1.25, extension20Pct: 2.15, closeLocationPct: 91 };
+  assert.deepEqual(scoreRiseRoom(same, DEFAULT_RISE_BOUNDS), scoreRiseRoom(same));
+  assert.equal(scoreRiseRoom(same, { ...DEFAULT_RISE_BOUNDS, extensionCapPct: 2 }).room, false);
 });
 
 test('a completed session keeps its later 5-session result and the unfinished tail is not an analog', () => {

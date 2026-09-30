@@ -7,7 +7,7 @@ import { loadDailyHistory } from '@/lib/market/daily-history';
 import { applyPricePush, displaySocialScore, EMPTY_PRICE_PUSH, observedCatalystScore, type PricePush } from '@/lib/market/price-push';
 import { loadPricePush } from '@/lib/market/attention';
 import { rankDailyConsiderations } from '@/lib/market/daily-rank';
-import { rememberRankedBook } from '@/lib/market/research-memory';
+import { loadChampionCard, rememberRankedBook } from '@/lib/market/research-memory';
 import { sessionRisk } from '@/lib/market/quant-stats';
 import { collectForwardAnalogs, summarizePriceHistory } from '@/lib/market/nasdaq-history';
 import { DELAYED_REFERENCE_MODEL, LIVE_SHADOW_MODEL, summarizeOpportunityEvidence } from '@/lib/market/research-quotes';
@@ -273,14 +273,15 @@ export async function GET() {
       .slice(0, 100);
 
     const symbols = opportunities.map((row) => String(row.input.symbol));
-    const [histories, pushes] = await Promise.all([
+    const [histories, pushes, champion] = await Promise.all([
       loadDailyHistory(symbols, 90),
       loadPricePush(symbols),
+      loadChampionCard(),
     ]);
     const withHistory = opportunities.map((opportunity) => {
       const symbol = String(opportunity.input.symbol).toUpperCase();
       const push = pushes.get(symbol) ?? EMPTY_PRICE_PUSH;
-      const history = summarizePriceHistory(opportunity.input.price, histories.get(symbol) ?? []);
+      const history = summarizePriceHistory(opportunity.input.price, histories.get(symbol) ?? [], champion.rise);
       return {
         ...applyObservedPush(opportunity, push, regime.outlookScore),
         push,
@@ -288,7 +289,7 @@ export async function GET() {
       };
     });
 
-    const analogs = symbols.flatMap((symbol) => collectForwardAnalogs(symbol, histories.get(symbol) ?? []));
+    const analogs = symbols.flatMap((symbol) => collectForwardAnalogs(symbol, histories.get(symbol) ?? [], 5, champion.rise));
     const candidates = withHistory.flatMap((row) => {
       const history = row.history;
       if (
@@ -313,7 +314,7 @@ export async function GET() {
         },
       }];
     });
-    const dailyRank = rankDailyConsiderations(candidates, analogs);
+    const dailyRank = rankDailyConsiderations(candidates, analogs, 10, champion.rank);
     const projectionBySymbol = new Map(dailyRank.considered.map((row) => [row.symbol, row]));
     const rankedBook = withHistory.map((row) => {
       const symbol = String(row.input.symbol).toUpperCase();
@@ -343,6 +344,7 @@ export async function GET() {
       dailyRank: {
         horizonSessions: dailyRank.horizonSessions,
         model: dailyRank.model,
+        card: { version: champion.version, hash: champion.hash, source: champion.source },
         picks: dailyRank.picks,
       },
       pennyScreen: {

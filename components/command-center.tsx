@@ -431,11 +431,37 @@ function DailyTen({ dailyRank, selected, setSelected }: { dailyRank: DailyRank; 
   return <div className="daily-ten"><div className="section-head"><div><h2>Daily 10</h2><p>{cardLabel}Up to 10 names whose similar past sessions finished with a positive average, ordered by that average. Edge divides the average by the typical adverse path. Research estimate only.{searchLabel}</p></div></div>{picks.length === 0 ? <p className="muted2">No penny has a positive average from similar past sessions.</p> : <div className="daily-ten-grid">{picks.map((pick) => <button key={pick.symbol} type="button" className={pick.symbol === selected ? 'selected' : ''} onClick={() => setSelected(pick.symbol)}><span>#{pick.rank}{pick.room ? ' · ROOM' : ''}</span><b>{pick.symbol}</b><strong className={changeClass(pick.expectancyPct)}>{formatChange(pick.expectancyPct)}</strong><small>median {formatChange(pick.projectedGainPct)} · {formatChange(pick.projectedLowPct)} to {formatChange(pick.projectedHighPct)}</small><small>{pick.winRatePct == null ? '—' : `${Math.round(pick.winRatePct)}% win`} · {pick.targetFirstPct == null ? '—' : `${Math.round(pick.targetFirstPct)}% target first`}</small><small>edge {pick.edge == null ? '—' : `${pick.edge.toFixed(2)}×`} · {pick.analogs} sessions</small></button>)}</div>}</div>;
 }
 
+function PaperSend({ symbol }: { symbol: string }) {
+  const [note, setNote] = useState(`Send 1 ${symbol} to Alpaca paper`);
+  const [busy, setBusy] = useState(false);
+  async function send() {
+    setBusy(true);
+    setNote('Sending…');
+    try {
+      const response = await fetch('/api/paper/alpaca', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ symbol, side: 'buy', quantity: 1 }),
+      });
+      const body = await response.json().catch(() => null) as { placed?: boolean; replayed?: boolean; reason?: string } | null;
+      if (body?.placed) setNote(`Sent 1 ${symbol} to Alpaca paper`);
+      else if (body?.replayed) setNote(`${symbol} was already sent to Alpaca paper`);
+      else if (body?.reason === 'alpaca_paper_not_configured') setNote('Alpaca paper key is not set');
+      else setNote('Alpaca paper did not take the buy');
+    } catch {
+      setNote('Alpaca paper did not take the buy');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return <button type="button" onClick={() => void send()} disabled={busy}>{note}</button>;
+}
+
 function BuyGateStrip({ ranked, setSelected }: { ranked: Opportunity[]; setSelected: (symbol: string) => void }) {
   const ready = ranked
     .filter((row) => row.history?.rise?.room && (row.projection?.expectancyPct ?? 0) > 0 && !row.push?.blocksRoom)
     .sort((left, right) => (right.projection?.expectancyPct ?? 0) - (left.projection?.expectancyPct ?? 0));
-  return <div className="rise-room"><span>Eligible buy</span>{ready.length === 0 ? <span>No penny is both ROOM and positive expectancy, so no new simulated buy is allowed.</span> : ready.map((row) => <button key={row.input.symbol} type="button" onClick={() => setSelected(row.input.symbol)}>{row.input.symbol}<b className="good">{formatChange(row.projection?.expectancyPct)}</b></button>)}</div>;
+  return <div className="rise-room"><span>Eligible buy</span>{ready.length === 0 ? <span>No penny is both ROOM and positive expectancy, so no new simulated buy is allowed. Alpaca paper takes a buy only from this strip.</span> : ready.map((row) => <span key={row.input.symbol}><button type="button" onClick={() => setSelected(row.input.symbol)}>{row.input.symbol}<b className="good">{formatChange(row.projection?.expectancyPct)}</b></button><PaperSend symbol={row.input.symbol} /></span>)}</div>;
 }
 
 function RiseRoomStrip({ ranked, setSelected }: { ranked: Opportunity[]; setSelected: (symbol: string) => void }) {

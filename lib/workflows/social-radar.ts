@@ -6,6 +6,7 @@ interface SocialPayload {
   mentions?: number;
   velocity?: number;
   crowding?: number;
+  unavailable?: boolean;
 }
 
 export interface SocialTrend {
@@ -59,6 +60,7 @@ export async function runSocialRadarWorkflow(): Promise<SocialRadarResult> {
 
   for (const row of rows) {
     const payload = (row.payload ?? {}) as SocialPayload;
+    if (payload.unavailable === true) continue;
     const current = grouped.get(row.symbol) ?? {
       mentions: 0,
       velocityMax: 0,

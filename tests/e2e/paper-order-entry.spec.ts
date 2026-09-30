@@ -4,6 +4,7 @@ test("paper order mutation is open and never exposes broker execution", async ({
   request,
 }) => {
   const response = await request.post("/api/paper/orders", {
+    headers: { "idempotency-key": "paper-e2e-no-database" },
     data: { symbol: "TEST", side: "buy", quantity: 1, orderType: "market" },
   });
   expect(response.status()).toBe(503);

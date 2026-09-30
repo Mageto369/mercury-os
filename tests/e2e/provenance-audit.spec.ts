@@ -16,6 +16,18 @@ test('survivors are counted from the rows actually used', () => {
   ]);
   expect(counts.liveSurviving).toBe(2);
   expect(counts.syntheticSurviving).toBe(1);
+  expect(counts.referenceSurviving).toBe(0);
+});
+
+test('a delayed-reference model is not a live survivor', () => {
+  const counts = countSurvivors([
+    { security_id: 'sec:AAA', model_version: 'mercury-delayed-reference-v1' },
+    { securityId: 'sec:BBB', modelVersion: 'mercury-live-shadow-v1' },
+    { security_id: 'validation:stress:1', model_version: 'mercury-delayed-reference-v1' },
+  ]);
+  expect(counts.referenceSurviving).toBe(1);
+  expect(counts.liveSurviving).toBe(1);
+  expect(counts.syntheticSurviving).toBe(1);
 });
 
 test('a clean result with no synthetic data present is reported as unproven, not as a pass', () => {
@@ -28,9 +40,24 @@ test('a clean result with no synthetic data present is reported as unproven, not
     liveSurviving: 500,
   });
   expect(audit.provenanceSafe).toBe(true);
+  expect(audit.liveEvidenceOnly).toBe(true);
   expect(audit.vacuous).toBe(true);
   expect(audit.filteringObserved).toBe(false);
   expect(audit.contaminationReasons.join(' ')).toContain('does not by itself demonstrate');
+});
+
+test('delayed-reference rows inside a live set are not live proof', () => {
+  const audit = summarizeProvenance('live', {
+    candidateRows: 1600,
+    syntheticCandidates: 0,
+    syntheticSurviving: 0,
+    liveSurviving: 0,
+    referenceSurviving: 1600,
+  });
+  expect(audit.liveEvidenceOnly).toBe(false);
+  expect(audit.provenanceSafe).toBe(false);
+  expect(audit.referenceSurviving).toBe(1600);
+  expect(audit.contaminationReasons.join(' ')).toContain('cannot count as live proof');
 });
 
 test('filtering that actually removed rows is reported as observed', () => {

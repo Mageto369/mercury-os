@@ -1,6 +1,8 @@
 import { gte } from 'drizzle-orm';
 import { getDb } from '@/lib/db';
 import { systemEvents } from '@/lib/db/schema';
+import { scoreGemCandidate } from '@/lib/workflows/gem-scores';
+import { PENNY_MAX_PRICE, PENNY_MIN_DOLLAR_VOLUME, screenPennyStock } from '@/lib/workflows/penny-screen';
 import { runLiquidityPulseWorkflow } from '@/lib/workflows/liquidity-pulse';
 import { runMarketRegimeWorkflow } from '@/lib/workflows/market-regime';
 import { runRiskGatewayWorkflow } from '@/lib/workflows/risk-gateway';
@@ -14,11 +16,12 @@ interface EventPayload {
 
 export interface GemCandidate {
   symbol: string;
+  price: number;
   gemScore: number;
   liquidityScore: number;
-  catalystScore: number;
-  structureScore: number;
-  attentionGapScore: number;
+  catalystScore: number | null;
+  structureScore: number | null;
+  attentionGapScore: number | null;
   marketOutlook: number;
   socialVelocity: number;
   promotionRisk: number;
@@ -29,6 +32,13 @@ export interface GemDiscoveryResult {
   candidates: GemCandidate[];
   universeSize: number;
   marketOutlook: number;
+  screen: {
+    name: 'penny';
+    maxPrice: number;
+    minDollarVolume: number;
+    considered: number;
+    admitted: number;
+  };
 }
 
 function clamp(value: number) {
@@ -67,36 +77,39 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
   const riskBySymbol = new Map(risk.flagged.map((flag) => [flag.symbol, flag]));
   const marketOutlook = regime.outlookScore;
 
-  const candidates = liquidity.signals.map((liquiditySignal) => {
+  const pennySignals = liquidity.signals.filter((liquiditySignal) => screenPennyStock({
+    symbol: liquiditySignal.symbol,
+    price: liquiditySignal.price,
+    dollarVolume: liquiditySignal.dollarVolume,
+    spreadBps: liquiditySignal.spreadBps,
+  }).pass);
+
+  const candidates = pennySignals.map((liquiditySignal) => {
     const socialSignal = socialBySymbol.get(liquiditySignal.symbol);
     const riskFlag = riskBySymbol.get(liquiditySignal.symbol);
-    const catalystScore = clamp(catalystBySymbol.get(liquiditySignal.symbol) ?? 50);
-    const structureScore = clamp(100 - (riskFlag?.maxRiskScore ?? 5));
+    const catalystScore = catalystBySymbol.has(liquiditySignal.symbol)
+      ? clamp(catalystBySymbol.get(liquiditySignal.symbol) ?? 0)
+      : null;
+    const structureScore = riskFlag ? clamp(100 - riskFlag.maxRiskScore) : null;
     const socialVelocity = socialSignal?.velocity ?? 0;
     const promotionRisk = socialSignal?.promotionRisk ?? 0;
     const attentionGapScore = socialSignal
       ? clamp(100 - socialVelocity * 0.55 - socialSignal.crowding * 0.35 - promotionRisk * 0.25)
-      : 92;
-
-    const gemScore = clamp(
-      liquiditySignal.liquidityScore * 0.28 +
-      catalystScore * 0.24 +
-      structureScore * 0.24 +
-      attentionGapScore * 0.16 +
-      marketOutlook * 0.08,
-    );
-
-    const reasons: string[] = [];
-    if (liquiditySignal.liquidityScore >= 75) reasons.push('strong tradable liquidity');
-    if (catalystScore >= 68) reasons.push('recent regulatory catalyst support');
-    if (structureScore >= 85) reasons.push('clean structural-risk profile');
-    if (attentionGapScore >= 75) reasons.push('low-crowding attention gap');
-    if (promotionRisk >= 55) reasons.push('promotion pressure reduces quality');
-    if (riskFlag) reasons.push('structural warning present');
+      : null;
+    const scored = scoreGemCandidate({
+      liquidityScore: liquiditySignal.liquidityScore,
+      marketOutlook,
+      catalystScore,
+      structureScore,
+      attentionGapScore,
+      promotionRisk,
+      hasRiskFlag: Boolean(riskFlag),
+    });
 
     return {
       symbol: liquiditySignal.symbol,
-      gemScore,
+      price: liquiditySignal.price,
+      gemScore: scored.gemScore,
       liquidityScore: liquiditySignal.liquidityScore,
       catalystScore,
       structureScore,
@@ -104,7 +117,7 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
       marketOutlook,
       socialVelocity,
       promotionRisk,
-      reasons,
+      reasons: scored.reasons,
     };
   }).sort((a, b) => b.gemScore - a.gemScore).slice(0, 100);
 
@@ -112,5 +125,12 @@ export async function runGemDiscoveryWorkflow(): Promise<GemDiscoveryResult> {
     candidates,
     universeSize: liquidity.signals.length,
     marketOutlook,
+    screen: {
+      name: 'penny',
+      maxPrice: PENNY_MAX_PRICE,
+      minDollarVolume: PENNY_MIN_DOLLAR_VOLUME,
+      considered: liquidity.signals.length,
+      admitted: pennySignals.length,
+    },
   };
 }

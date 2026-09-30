@@ -34,6 +34,28 @@ test('intelligence pulse invokes backend and dashboard remains interactive', asy
   await expect(page.getByRole('button', { name: /Run Intelligence Pulse/i })).toBeEnabled();
 });
 
+test('workspace boards render readable sections without a warehouse', async ({ page }) => {
+  await page.goto('/');
+  const sections = [
+    ['Market Outlook', 'Liquidity tape'],
+    ['Discovery', 'Gem candidates'],
+    ['Social Radar', 'Social trends'],
+    ['Portfolio', 'Shadow book'],
+    ['Risk', 'Kill switches'],
+    ['Research', 'Research proof'],
+    ['Models', 'Model registry'],
+    ['Audit', 'System events'],
+  ] as const;
+  for (const [workspace, heading] of sections) {
+    await page.getByRole('button', { name: workspace, exact: true }).click();
+    await expect(page.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'Risk', exact: true }).click();
+  await expect(page.getByText('CLEAR').first()).toBeVisible();
+  await page.getByRole('button', { name: 'Social Radar', exact: true }).click();
+  await expect(page.getByText('No social trends are stored.')).toBeVisible();
+});
+
 test('opportunity workspace never labels validation data as live evidence', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Opportunities', exact: true }).click();

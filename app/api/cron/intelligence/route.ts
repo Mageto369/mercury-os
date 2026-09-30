@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { runSupervisor } from "@/lib/agents/supervisor";
 import { routeOperationalAlert } from "@/lib/alerts/router";
+import { refreshResearchLabels } from "@/lib/market/research-memory";
 import { matureOpportunityOutcomes } from "@/lib/performance/outcomes";
 import { refreshSourceReputation } from "@/lib/research/source-reputation";
 import { buildShadowPortfolio } from "@/lib/portfolio/shadow-portfolio";
+import { runPaperEngine } from "@/lib/paper/auto-engine";
 import { settleRestingOrders } from "@/lib/paper/order-engine";
 import { pullAndPersistMarketData } from "@/lib/providers/market/router";
 import { runOpenDataMesh } from "@/lib/providers/open-data/mesh";
@@ -16,7 +18,7 @@ import {
   recordIngestionResult,
   type IngestionPolicy,
 } from "@/lib/admin/ingestion-runtime";
-import type { IntelligenceJobName } from "@/lib/workflows/jobs";
+import { jobsDueAt, type IntelligenceJobName } from "@/lib/workflows/jobs";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -103,6 +105,24 @@ async function runIntelligenceCycle(force = false) {
   let entityGraph: SafeResult;
   let deepIntelligence: SafeResult;
 
+  const sidecarConfigured = Boolean(
+    process.env.OPEN_INTELLIGENCE_URL ||
+      process.env.SEC_CIK_MAPPER_URL ||
+      process.env.EDGARTOOLS_URL,
+  );
+  let prefetchedUniverse: unknown = null;
+  if (marketPolicy?.due && sidecarConfigured) {
+    try {
+      const prefetch = await runOpenIntelligenceSync({ universeOnly: true });
+      prefetchedUniverse = "universe" in prefetch ? prefetch.universe : prefetch;
+    } catch (error) {
+      prefetchedUniverse = {
+        ok: false,
+        reason: error instanceof Error ? error.message : "universe_prefetch_failed",
+      };
+    }
+  }
+
   if (marketPolicy?.due) {
     try {
       marketRefresh = await pullAndPersistMarketData(marketPolicy.batchSize);
@@ -142,7 +162,13 @@ async function runIntelligenceCycle(force = false) {
     };
   if (openIntelDue) {
     try {
-      openIntelligenceRefresh = await runOpenIntelligenceSync();
+      const refresh = await runOpenIntelligenceSync({
+        skipUniverse: prefetchedUniverse !== null,
+      });
+      openIntelligenceRefresh =
+        prefetchedUniverse !== null
+          ? { ...refresh, universe: prefetchedUniverse }
+          : refresh;
     } catch (error) {
       openIntelligenceRefresh = {
         ok: false,
@@ -153,10 +179,13 @@ async function runIntelligenceCycle(force = false) {
       };
     }
   } else
-    openIntelligenceRefresh = {
-      ok: false,
-      reason: "not_due_or_disabled_by_ingestion_policy",
-    };
+    openIntelligenceRefresh =
+      prefetchedUniverse !== null
+        ? { ok: true, universe: prefetchedUniverse, reason: "universe_prefetch_only" }
+        : {
+            ok: false,
+            reason: "not_due_or_disabled_by_ingestion_policy",
+          };
 
   const jobMap: Partial<Record<keyof typeof ingestion, IntelligenceJobName>> = {
     "social-radar": "social-radar",
@@ -169,7 +198,19 @@ async function runIntelligenceCycle(force = false) {
     .filter(([key]) => ingestion[key]?.due)
     .map(([, job]) => job!)
     .filter(Boolean);
-  const result = await runSupervisor(now, requestedJobs, force ? "manual" : "cron");
+  const scoringJobs: IntelligenceJobName[] = [
+    "liquidity-pulse",
+    "risk-gateway",
+    "market-regime",
+    "gem-discovery",
+  ];
+  const dueScoring = force
+    ? scoringJobs
+    : jobsDueAt(now)
+        .map((job) => job.name)
+        .filter((name) => scoringJobs.includes(name));
+  const fleetJobs = [...new Set<IntelligenceJobName>([...requestedJobs, ...dueScoring])];
+  const result = await runSupervisor(now, fleetJobs, force ? "manual" : "cron");
   const assignment = (job: IntelligenceJobName) =>
     result.assignments.find((item) => item.job === job) ?? {
       status: "skipped",
@@ -236,6 +277,9 @@ async function runIntelligenceCycle(force = false) {
   let outcomeMaturation:
     | Awaited<ReturnType<typeof matureOpportunityOutcomes>>
     | { ok: false; reason: string };
+  let researchLabels:
+    | Awaited<ReturnType<typeof refreshResearchLabels>>
+    | { ok: false; reason: string; labeled: number; capitalExecutionEnabled: false };
   let signalAttribution:
     | Awaited<ReturnType<typeof runSignalAttribution>>
     | { ok: false; reason: string };
@@ -255,6 +299,17 @@ async function runIntelligenceCycle(force = false) {
       ok: false,
       reason:
         error instanceof Error ? error.message : "outcome_maturation_failed",
+    };
+  }
+  try {
+    researchLabels = await refreshResearchLabels();
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+    researchLabels = {
+      ok: false,
+      reason: code || "research_label_failed",
+      labeled: 0,
+      capitalExecutionEnabled: false,
     };
   }
   try {
@@ -284,8 +339,24 @@ async function runIntelligenceCycle(force = false) {
         error instanceof Error ? error.message : "shadow_portfolio_failed",
     };
   }
-  // Resting orders are the other half of the paper lifecycle: without this pass
-  // an open limit order can never fill and a day order never expires.
+  let paperEngine:
+    | Awaited<ReturnType<typeof runPaperEngine>>
+    | { ok: false; reason: string };
+  try {
+    const positions =
+      shadowPortfolio &&
+      typeof shadowPortfolio === "object" &&
+      "positions" in shadowPortfolio &&
+      Array.isArray(shadowPortfolio.positions)
+        ? (shadowPortfolio.positions as Array<Record<string, unknown>>)
+        : undefined;
+    paperEngine = await runPaperEngine({ positions });
+  } catch (error) {
+    paperEngine = {
+      ok: false,
+      reason: error instanceof Error ? error.message : "paper_engine_failed",
+    };
+  }
   try {
     restingOrders = await settleRestingOrders(now);
   } catch (error) {
@@ -324,6 +395,7 @@ async function runIntelligenceCycle(force = false) {
     mode: result.mode,
     autonomousExecution: false,
     capitalExecutionEnabled: false,
+    paperEngine,
     supervisor: result.supervisor,
     startedAt: result.startedAt,
     completedAt: result.completedAt,
@@ -344,6 +416,7 @@ async function runIntelligenceCycle(force = false) {
     entityGraph,
     deepIntelligence,
     outcomeMaturation,
+    researchLabels,
     signalAttribution,
     sourceReputation,
     shadowPortfolio,

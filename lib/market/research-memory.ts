@@ -1,0 +1,824 @@
+import { getSql } from "@/lib/db";
+import { toJsonb } from "@/lib/db/json";
+import { rankDailyConsiderations, type AnalogObservation, type RankCandidate, type RankKnobs } from "@/lib/market/daily-rank";
+import { loadDailyHistory } from "@/lib/market/daily-history";
+import { scoreRiseRoom, type RiseBounds } from "@/lib/market/nasdaq-history";
+import { observedCatalystScore, type PricePush } from "@/lib/market/price-push";
+import { buildResearchDecision, researchGatePass, type JournalProjection, type ResearchDecision } from "@/lib/market/research-journal";
+import { labelForwardSession } from "@/lib/market/research-label";
+import { DELAYED_REFERENCE_MODEL } from "@/lib/market/research-quotes";
+import { scoreResearchBook, type ResearchScorecard, type ScoredResearchRow } from "@/lib/market/research-scorecard";
+import { cardHash, cardWithinBounds, RESEARCH_CARD_KEY, RESEARCH_CARD_VERSION, SEED_RULE_CARD, type ResearchRuleCard } from "@/lib/market/rule-card";
+import { chooseChallenger, isSearchKnob, MIN_LABELED_SESSIONS, shadowAdoption, type ChallengerSearch, type SearchKnob, type SearchScore } from "@/lib/market/rule-search";
+
+export interface ResearchMemoryResult {
+  ok: true;
+  cardVersion: string;
+  cardHash: string;
+  decisions: number;
+  labels: number;
+  promoted: false;
+  capitalExecutionEnabled: false;
+  evidenceClass: "delayed-reference";
+}
+
+interface RememberRow {
+  modelVersion?: string | null;
+  input: { symbol?: unknown; price?: number | null };
+  decision?: { action?: string | null };
+  history?: {
+    sessions?: Array<{ date: string }>;
+    return5Pct?: number | null;
+    relativeVolume?: number | null;
+    extension20Pct?: number | null;
+    closeLocationPct?: number | null;
+    rise?: { score: number | null; room: boolean };
+  } | null;
+  push?: PricePush | null;
+  projection?: (JournalProjection & { room?: boolean }) | null;
+}
+
+const CARD_PAYLOAD = {
+  brokerAuthority: false,
+  capitalExecutionEnabled: false,
+  evidenceClass: "delayed-reference",
+  teacher: "delayed-daily-5-session",
+};
+
+let ready: Promise<void> | null = null;
+
+function asDay(value: unknown) {
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(value ?? ""));
+  return match?.[1] ?? "";
+}
+
+function num(value: unknown) {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function flag(value: unknown) {
+  return value === true || value === "t" || value === "true";
+}
+
+async function createAndSeed() {
+  const sql = getSql();
+  if (!sql) return;
+  await sql`CREATE TABLE IF NOT EXISTS research_decisions (
+    id text PRIMARY KEY,
+    session_date date NOT NULL,
+    symbol text NOT NULL,
+    card_version text NOT NULL,
+    card_hash text NOT NULL,
+    evidence_class text NOT NULL,
+    price numeric(18,8),
+    return_5 numeric(12,4),
+    relative_volume numeric(12,4),
+    extension_20 numeric(12,4),
+    close_location numeric(12,4),
+    rise_score numeric(8,2),
+    room boolean NOT NULL DEFAULT false,
+    blocks_room boolean NOT NULL DEFAULT false,
+    social_hype numeric(8,2),
+    catalyst_score numeric(8,2),
+    rank integer,
+    eligible boolean NOT NULL DEFAULT false,
+    expectancy_pct numeric(12,4),
+    projected_gain_pct numeric(12,4),
+    projected_low_pct numeric(12,4),
+    projected_high_pct numeric(12,4),
+    edge numeric(12,4),
+    win_rate_pct numeric(12,4),
+    payoff numeric(12,4),
+    adverse_pct numeric(12,4),
+    favorable_pct numeric(12,4),
+    target_first_pct numeric(12,4),
+    analogs integer,
+    shadow_action text,
+    gate_pass boolean NOT NULL DEFAULT false,
+    regime text,
+    payload jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    observed_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (session_date, symbol, card_version)
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS research_decision_session_idx ON research_decisions(session_date, symbol)`;
+  await sql`CREATE TABLE IF NOT EXISTS research_labels (
+    id text PRIMARY KEY,
+    decision_id text NOT NULL UNIQUE REFERENCES research_decisions(id),
+    symbol text NOT NULL,
+    session_date date NOT NULL,
+    horizon_sessions integer NOT NULL DEFAULT 5,
+    forward_5_pct numeric(12,4),
+    adverse_pct numeric(12,4),
+    favorable_pct numeric(12,4),
+    target_first boolean,
+    entry_close numeric(18,8),
+    exit_close numeric(18,8),
+    bar_dates jsonb,
+    evidence_class text NOT NULL DEFAULT 'delayed-reference',
+    source text NOT NULL DEFAULT 'nasdaq-delayed',
+    labeled_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  await sql`CREATE INDEX IF NOT EXISTS research_label_session_idx ON research_labels(session_date, symbol)`;
+  await sql`
+    INSERT INTO model_registry (
+      id, model_key, version, role, status, strategy, regime, feature_manifest,
+      promotion_metrics, created_at, promoted_at
+    ) VALUES (
+      ${`model:${RESEARCH_CARD_KEY}:${RESEARCH_CARD_VERSION}`},
+      ${RESEARCH_CARD_KEY},
+      ${RESEARCH_CARD_VERSION},
+      'champion',
+      'shadow',
+      'penny-analog-rank',
+      'all',
+      ${toJsonb(SEED_RULE_CARD)}::jsonb,
+      ${toJsonb(CARD_PAYLOAD)}::jsonb,
+      now(),
+      now()
+    )
+    ON CONFLICT (model_key, version) DO NOTHING
+  `;
+}
+
+export function ensureResearchMemory() {
+  if (!ready) {
+    ready = createAndSeed().catch((error: unknown) => {
+      ready = null;
+      throw error;
+    });
+  }
+  return ready;
+}
+
+async function writeDecision(decision: ResearchDecision) {
+  const sql = getSql();
+  if (!sql) return 0;
+  const written = await sql<{ id: string }[]>`
+    INSERT INTO research_decisions (
+      id, session_date, symbol, card_version, card_hash, evidence_class, price,
+      return_5, relative_volume, extension_20, close_location, rise_score, room, blocks_room,
+      social_hype, catalyst_score, rank, eligible, expectancy_pct, projected_gain_pct,
+      projected_low_pct, projected_high_pct, edge, win_rate_pct, payoff, adverse_pct,
+      favorable_pct, target_first_pct, analogs, shadow_action, gate_pass, regime, payload, observed_at
+    ) VALUES (
+      ${decision.id}, ${decision.sessionDate}, ${decision.symbol}, ${decision.cardVersion}, ${decision.cardHash},
+      ${decision.evidenceClass}, ${decision.price}, ${decision.return5Pct}, ${decision.relativeVolume},
+      ${decision.extension20Pct}, ${decision.closeLocationPct}, ${decision.riseScore}, ${decision.room},
+      ${decision.blocksRoom}, ${decision.socialHype}, ${decision.catalystScore}, ${decision.rank},
+      ${decision.eligible}, ${decision.expectancyPct}, ${decision.projectedGainPct}, ${decision.projectedLowPct},
+      ${decision.projectedHighPct}, ${decision.edge}, ${decision.winRatePct}, ${decision.payoff},
+      ${decision.adversePct}, ${decision.favorablePct}, ${decision.targetFirstPct}, ${decision.analogs},
+      ${decision.shadowAction}, ${decision.gatePass}, ${decision.regime},
+      ${toJsonb({ teacher: "delayed-daily-5-session", shadowOnly: true, capitalExecutionEnabled: false })}::jsonb,
+      now()
+    )
+    ON CONFLICT (session_date, symbol, card_version) DO UPDATE SET
+      card_hash = excluded.card_hash,
+      evidence_class = excluded.evidence_class,
+      price = excluded.price,
+      return_5 = excluded.return_5,
+      relative_volume = excluded.relative_volume,
+      extension_20 = excluded.extension_20,
+      close_location = excluded.close_location,
+      rise_score = excluded.rise_score,
+      room = excluded.room,
+      blocks_room = excluded.blocks_room,
+      social_hype = excluded.social_hype,
+      catalyst_score = excluded.catalyst_score,
+      rank = excluded.rank,
+      eligible = excluded.eligible,
+      expectancy_pct = excluded.expectancy_pct,
+      projected_gain_pct = excluded.projected_gain_pct,
+      projected_low_pct = excluded.projected_low_pct,
+      projected_high_pct = excluded.projected_high_pct,
+      edge = excluded.edge,
+      win_rate_pct = excluded.win_rate_pct,
+      payoff = excluded.payoff,
+      adverse_pct = excluded.adverse_pct,
+      favorable_pct = excluded.favorable_pct,
+      target_first_pct = excluded.target_first_pct,
+      analogs = excluded.analogs,
+      shadow_action = excluded.shadow_action,
+      gate_pass = excluded.gate_pass,
+      regime = excluded.regime,
+      payload = excluded.payload,
+      observed_at = now()
+    WHERE NOT EXISTS (
+      SELECT 1 FROM research_labels AS labeled WHERE labeled.decision_id = research_decisions.id
+    )
+    RETURNING id
+  `;
+  return written.length;
+}
+
+export async function refreshResearchLabels(limit = 200) {
+  const sql = getSql();
+  if (!sql) return { ok: false as const, reason: "database_not_configured" as const, labeled: 0, capitalExecutionEnabled: false as const };
+  await ensureResearchMemory();
+  const pending = await sql<{ id: string; symbol: string; session_date: Date | string }[]>`
+    SELECT d.id, d.symbol, d.session_date
+    FROM research_decisions d
+    LEFT JOIN research_labels l ON l.decision_id = d.id
+    WHERE l.id IS NULL
+    ORDER BY d.session_date ASC
+    LIMIT ${Math.max(1, Math.min(500, limit))}
+  `;
+  const symbols = [...new Set(pending.map((row) => String(row.symbol).toUpperCase()))];
+  const histories = await loadDailyHistory(symbols, 90);
+  let labeled = 0;
+  for (const row of pending) {
+    const sessionDate = asDay(row.session_date);
+    const symbol = String(row.symbol).toUpperCase();
+    const label = labelForwardSession(histories.get(symbol) ?? [], sessionDate);
+    if (!label) continue;
+    const inserted = await sql<{ id: string }[]>`
+      INSERT INTO research_labels (
+        id, decision_id, symbol, session_date, horizon_sessions, forward_5_pct, adverse_pct,
+        favorable_pct, target_first, entry_close, exit_close, bar_dates, evidence_class, source
+      ) VALUES (
+        ${`label:${row.id}`}, ${row.id}, ${symbol}, ${sessionDate}, ${label.horizonSessions},
+        ${label.forward5Pct}, ${label.adversePct}, ${label.favorablePct}, ${label.targetFirst},
+        ${label.entryClose}, ${label.exitClose}, ${toJsonb(label.barDates)}::jsonb,
+        ${label.evidenceClass}, ${label.source}
+      )
+      ON CONFLICT (decision_id) DO NOTHING
+      RETURNING id
+    `;
+    labeled += inserted.length;
+  }
+  return { ok: true as const, labeled, capitalExecutionEnabled: false as const };
+}
+
+/** Journal the book the command page just ranked. The paper engine does not read these rows. */
+export async function rememberRankedBook(input: { regime: string | null; rows: RememberRow[] }): Promise<ResearchMemoryResult> {
+  const sql = getSql();
+  if (!sql) {
+    return {
+      ok: true,
+      cardVersion: RESEARCH_CARD_VERSION,
+      cardHash: cardHash(SEED_RULE_CARD),
+      decisions: 0,
+      labels: 0,
+      promoted: false,
+      capitalExecutionEnabled: false,
+      evidenceClass: "delayed-reference",
+    };
+  }
+  await ensureResearchMemory();
+  const stored = await loadStoredRuleCard();
+  const active = viewFromCard(stored.card, stored.source);
+  const card = { version: active.version, hash: active.hash, expectancyFloorPct: stored.card.expectancyFloorPct };
+  const decisions = input.rows.flatMap((row) => {
+    const decision = buildResearchDecision({
+      symbol: String(row.input.symbol ?? ""),
+      sessionDate: row.history?.sessions?.[0]?.date ?? "",
+      evidenceClass: row.modelVersion === DELAYED_REFERENCE_MODEL ? "delayed-reference" : "live",
+      price: row.input.price ?? null,
+      return5Pct: row.history?.return5Pct ?? null,
+      relativeVolume: row.history?.relativeVolume ?? null,
+      extension20Pct: row.history?.extension20Pct ?? null,
+      closeLocationPct: row.history?.closeLocationPct ?? null,
+      riseScore: row.history?.rise?.score ?? null,
+      room: Boolean(row.projection?.room ?? row.history?.rise?.room),
+      blocksRoom: Boolean(row.push?.blocksRoom),
+      socialHype: row.push?.socialHype ?? null,
+      catalystScore: row.push ? observedCatalystScore(row.push) : null,
+      shadowAction: row.decision?.action ?? null,
+      regime: input.regime,
+    }, row.projection ?? null, card);
+    return decision ? [decision] : [];
+  });
+  let written = 0;
+  for (const decision of decisions) written += await writeDecision(decision);
+  const labels = await refreshResearchLabels();
+  return {
+    ok: true,
+    cardVersion: active.version,
+    cardHash: active.hash,
+    decisions: written,
+    labels: labels.labeled,
+    promoted: false,
+    capitalExecutionEnabled: false,
+    evidenceClass: "delayed-reference",
+  };
+}
+
+export interface ActiveRuleCard {
+  version: string;
+  hash: string;
+  source: "champion" | "seed";
+  rank: RankKnobs;
+  rise: RiseBounds;
+}
+
+function finiteField(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function manifestCard(value: unknown): ResearchRuleCard | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Record<string, unknown>;
+  if (row.model !== "mercury-analog-rank-v3") return null;
+  if (row.evidenceClass !== "delayed-reference") return null;
+  if (row.capitalExecutionEnabled !== false) return null;
+  if (Number(row.horizonSessions) !== 5) return null;
+  const edge = row.edgeFloor == null ? null : finiteField(row.edgeFloor);
+  const card: ResearchRuleCard = {
+    version: String(row.version ?? ""),
+    model: "mercury-analog-rank-v3",
+    roomRelativeVolumeFloor: finiteField(row.roomRelativeVolumeFloor),
+    roomExtensionCapPct: finiteField(row.roomExtensionCapPct),
+    roomCloseLocationFloor: finiteField(row.roomCloseLocationFloor),
+    riseWeightRoom: finiteField(row.riseWeightRoom),
+    riseWeightHold: finiteField(row.riseWeightHold),
+    riseWeightTrend: finiteField(row.riseWeightTrend),
+    riseWeightVolume: finiteField(row.riseWeightVolume),
+    analogDistanceCap: finiteField(row.analogDistanceCap),
+    minAnalogs: finiteField(row.minAnalogs),
+    expectancyFloorPct: finiteField(row.expectancyFloorPct),
+    edgeFloor: edge != null && Number.isFinite(edge) ? edge : null,
+    strengthFloor: finiteField(row.strengthFloor),
+    horizonSessions: 5,
+    evidenceClass: "delayed-reference",
+    capitalExecutionEnabled: false,
+  };
+  return cardWithinBounds(card) ? card : null;
+}
+
+function viewFromCard(card: ResearchRuleCard, source: ActiveRuleCard["source"]): ActiveRuleCard {
+  return {
+    version: card.version,
+    hash: cardHash(card),
+    source,
+    rank: {
+      minAnalogs: card.minAnalogs,
+      distanceCap: card.analogDistanceCap,
+      strengthFloor: card.strengthFloor,
+      expectancyFloorPct: card.expectancyFloorPct,
+      edgeFloor: card.edgeFloor,
+    },
+    rise: {
+      relativeVolumeFloor: card.roomRelativeVolumeFloor,
+      extensionCapPct: card.roomExtensionCapPct,
+      closeLocationFloor: card.roomCloseLocationFloor,
+      weightRoom: card.riseWeightRoom / 100,
+      weightHold: card.riseWeightHold / 100,
+      weightTrend: card.riseWeightTrend / 100,
+      weightVolume: card.riseWeightVolume / 100,
+    },
+  };
+}
+
+async function loadStoredRuleCard(): Promise<{ card: ResearchRuleCard; source: ActiveRuleCard["source"] }> {
+  const fallback = { card: SEED_RULE_CARD, source: "seed" as const };
+  const sql = getSql();
+  if (!sql) return fallback;
+  try {
+    const rows = await sql<{ version: string; feature_manifest: unknown }[]>`
+      SELECT version, feature_manifest
+      FROM model_registry
+      WHERE model_key = ${RESEARCH_CARD_KEY}
+        AND role = 'champion'
+        AND status = 'shadow'
+        AND retired_at IS NULL
+      ORDER BY promoted_at DESC NULLS LAST
+      LIMIT 1
+    `;
+    const card = manifestCard(rows[0]?.feature_manifest);
+    if (!card || card.version !== rows[0]?.version) return fallback;
+    return { card, source: "champion" };
+  } catch {
+    return fallback;
+  }
+}
+
+/** Champion card when the registry row is inside bounds. Otherwise the in-code seed. */
+export async function loadChampionCard(): Promise<ActiveRuleCard> {
+  const stored = await loadStoredRuleCard();
+  return viewFromCard(stored.card, stored.source);
+}
+
+/** Store today's grade. A recorded scorecard still leaves the champion card unchanged. */
+export async function recordResearchScorecard() {
+  const sql = getSql();
+  if (!sql) return { ok: false as const, reason: "database_not_configured" as const, scorecard: null };
+  await ensureResearchMemory();
+  const stored = await loadStoredRuleCard();
+  const rows = await sql<{
+    session_date: Date | string;
+    eligible: boolean;
+    rank: number | null;
+    expectancy_pct: string | null;
+    room: boolean;
+    blocks_room: boolean;
+    gate_pass: boolean;
+    forward_5_pct: string | null;
+    realized_adverse: string | null;
+  }[]>`
+    SELECT d.session_date, d.eligible, d.rank, d.expectancy_pct, d.room, d.blocks_room, d.gate_pass,
+           l.forward_5_pct, l.adverse_pct AS realized_adverse
+    FROM research_decisions d
+    LEFT JOIN research_labels l ON l.decision_id = d.id
+    WHERE d.card_version = ${stored.card.version}
+  `;
+  const scored: ScoredResearchRow[] = rows.map((row) => ({
+    sessionDate: asDay(row.session_date),
+    eligible: flag(row.eligible),
+    rank: num(row.rank),
+    expectancyPct: num(row.expectancy_pct),
+    room: flag(row.room),
+    blocksRoom: flag(row.blocks_room),
+    gatePass: flag(row.gate_pass),
+    forward5Pct: num(row.forward_5_pct),
+    realizedAdversePct: num(row.realized_adverse),
+  }));
+  const scorecard: ResearchScorecard = scoreResearchBook(scored);
+  const day = new Date().toISOString().slice(0, 10);
+  await sql`
+    INSERT INTO experiment_runs (
+      id, model_key, model_version, experiment_type, status, regime, sample_size,
+      metrics, leakage_checks, cost_assumptions, started_at, completed_at
+    ) VALUES (
+      ${`experiment:research-scorecard:${day}`},
+      ${RESEARCH_CARD_KEY},
+      ${RESEARCH_CARD_VERSION},
+      'research-scorecard',
+      ${scorecard.status},
+      'all',
+      ${scorecard.tenSlots},
+      ${toJsonb(scorecard)}::jsonb,
+      ${toJsonb({ teacher: scorecard.teacher, holdoutUsedForPromotion: false, liveEvidence: false })}::jsonb,
+      ${toJsonb({ capitalExecutionEnabled: false, brokerAuthority: false })}::jsonb,
+      now(),
+      now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      status = excluded.status,
+      sample_size = excluded.sample_size,
+      metrics = excluded.metrics,
+      leakage_checks = excluded.leakage_checks,
+      cost_assumptions = excluded.cost_assumptions,
+      completed_at = now()
+  `;
+  return { ok: true as const, scorecard, promoted: false as const, capitalExecutionEnabled: false as const };
+}
+
+export interface ChallengerReadiness {
+  labeledSessions: number;
+  neededSessions: number;
+  nextKnob: SearchKnob;
+  status: "ready" | "insufficient";
+  promoted: false;
+  capitalExecutionEnabled: false;
+}
+
+interface LearnedRow {
+  sessionDate: string;
+  symbol: string;
+  return5Pct: number;
+  relativeVolume: number;
+  extension20Pct: number;
+  closeLocationPct: number;
+  blocksRoom: boolean;
+  socialHype: number | null;
+  forward5Pct: number | null;
+  adversePct: number | null;
+  favorablePct: number | null;
+  targetFirst: boolean | null;
+}
+
+function tri(value: unknown) {
+  if (value == null) return null;
+  if (value === true || value === "t" || value === "true") return true;
+  if (value === false || value === "f" || value === "false") return false;
+  return null;
+}
+
+function metricsRecord(value: unknown) {
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" ? value as Record<string, unknown> : null;
+}
+
+/** How many labeled sessions the next Replay search will see. Does not run the search. */
+export async function challengerReadiness(): Promise<ChallengerReadiness | null> {
+  const sql = getSql();
+  if (!sql) return null;
+  try {
+    await ensureResearchMemory();
+    const [counted, latest] = await Promise.all([
+      sql<{ sessions: number | string }[]>`
+        SELECT COUNT(DISTINCT d.session_date)::int AS sessions
+        FROM research_decisions d
+        INNER JOIN research_labels l ON l.decision_id = d.id
+        WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+          OR d.card_version LIKE 'challenger-%'
+      `,
+      sql<{ metrics: unknown }[]>`
+        SELECT metrics
+        FROM experiment_runs
+        WHERE model_key = ${RESEARCH_CARD_KEY}
+          AND experiment_type = 'research-challenger'
+        ORDER BY completed_at DESC NULLS LAST
+        LIMIT 1
+      `,
+    ]);
+    const labeledSessions = num(counted[0]?.sessions) ?? 0;
+    const next = metricsRecord(latest[0]?.metrics)?.nextKnob;
+    const nextKnob: SearchKnob = isSearchKnob(next) ? next : "relativeVolume";
+    return {
+      labeledSessions,
+      neededSessions: MIN_LABELED_SESSIONS,
+      nextKnob,
+      status: labeledSessions >= MIN_LABELED_SESSIONS ? "ready" : "insufficient",
+      promoted: false,
+      capitalExecutionEnabled: false,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function loadLearnedRows(championVersion: string) {
+  const sql = getSql();
+  if (!sql) return [];
+  const rows = await sql<{
+    session_date: Date | string;
+    symbol: string;
+    return_5: string | null;
+    relative_volume: string | null;
+    extension_20: string | null;
+    close_location: string | null;
+    blocks_room: boolean;
+    social_hype: string | null;
+    forward_5_pct: string | null;
+    adverse_pct: string | null;
+    favorable_pct: string | null;
+    target_first: boolean | null;
+  }[]>`
+    SELECT DISTINCT ON (d.session_date, d.symbol)
+           d.session_date, d.symbol, d.return_5, d.relative_volume, d.extension_20, d.close_location,
+           d.blocks_room, d.social_hype, l.forward_5_pct, l.adverse_pct, l.favorable_pct, l.target_first
+    FROM research_decisions d
+    LEFT JOIN research_labels l ON l.decision_id = d.id
+    WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+       OR d.card_version LIKE 'challenger-%'
+    ORDER BY d.session_date, d.symbol, (d.card_version = ${championVersion}) DESC, d.observed_at DESC
+  `;
+  return rows.flatMap((row) => {
+    const return5Pct = num(row.return_5);
+    const relativeVolume = num(row.relative_volume);
+    const extension20Pct = num(row.extension_20);
+    const closeLocationPct = num(row.close_location);
+    if (return5Pct == null || relativeVolume == null || extension20Pct == null || closeLocationPct == null) return [];
+    const learned: LearnedRow = {
+      sessionDate: asDay(row.session_date),
+      symbol: String(row.symbol).toUpperCase(),
+      return5Pct,
+      relativeVolume,
+      extension20Pct,
+      closeLocationPct,
+      blocksRoom: flag(row.blocks_room),
+      socialHype: num(row.social_hype),
+      forward5Pct: num(row.forward_5_pct),
+      adversePct: num(row.adverse_pct),
+      favorablePct: num(row.favorable_pct),
+      targetFirst: tri(row.target_first),
+    };
+    return learned.sessionDate ? [learned] : [];
+  });
+}
+
+function gradeCard(card: ResearchRuleCard, dates: readonly string[], rows: LearnedRow[]): SearchScore {
+  const active = viewFromCard(card, "seed");
+  const wanted = new Set(dates);
+  const scored: ScoredResearchRow[] = [];
+  for (const sessionDate of [...wanted].sort()) {
+    const candidates: RankCandidate[] = [];
+    const dayRows: Array<{ row: LearnedRow; rawRoom: boolean }> = [];
+    for (const row of rows) {
+      if (row.sessionDate !== sessionDate) continue;
+      const rise = scoreRiseRoom(row, active.rise);
+      if (rise.score == null) continue;
+      dayRows.push({ row, rawRoom: rise.room });
+      candidates.push({
+        symbol: row.symbol,
+        asOf: sessionDate,
+        blocksRoom: row.blocksRoom,
+        socialHype: row.socialHype,
+        setup: {
+          return5Pct: row.return5Pct,
+          relativeVolume: row.relativeVolume,
+          extension20Pct: row.extension20Pct,
+          closeLocationPct: row.closeLocationPct,
+          room: rise.room && !row.blocksRoom,
+          riseScore: rise.score,
+        },
+      });
+    }
+    const analogs: AnalogObservation[] = [];
+    for (const row of rows) {
+      if (!(row.sessionDate < sessionDate) || row.forward5Pct == null) continue;
+      const rise = scoreRiseRoom(row, active.rise);
+      if (rise.score == null) continue;
+      analogs.push({
+        symbol: row.symbol,
+        date: row.sessionDate,
+        return5Pct: row.return5Pct,
+        relativeVolume: row.relativeVolume,
+        extension20Pct: row.extension20Pct,
+        closeLocationPct: row.closeLocationPct,
+        room: rise.room,
+        riseScore: rise.score,
+        forward5Pct: row.forward5Pct,
+        adversePct: row.adversePct,
+        favorablePct: row.favorablePct,
+        targetFirst: row.targetFirst,
+      });
+    }
+    const ranked = rankDailyConsiderations(candidates, analogs, 10, active.rank);
+    const bySymbol = new Map(ranked.considered.map((row) => [row.symbol, row]));
+    for (const { row, rawRoom } of dayRows) {
+      const considered = bySymbol.get(row.symbol);
+      scored.push({
+        sessionDate,
+        eligible: considered?.eligible ?? false,
+        rank: considered?.rank ?? null,
+        expectancyPct: considered?.expectancyPct ?? null,
+        room: considered?.room ?? false,
+        blocksRoom: row.blocksRoom,
+        gatePass: researchGatePass({
+          room: rawRoom,
+          blocksRoom: row.blocksRoom,
+          expectancyPct: considered?.expectancyPct ?? null,
+          floorPct: card.expectancyFloorPct,
+        }),
+        forward5Pct: row.forward5Pct,
+        realizedAdversePct: row.adversePct,
+      });
+    }
+  }
+  const book = scoreResearchBook(scored);
+  return {
+    tenSlots: book.tenSlots,
+    selectionPct: book.selectionPct,
+    tenAdversePct: book.tenAdversePct,
+    calibrationPct: book.calibrationPct,
+  };
+}
+
+/** Replay grades one neighbor. A holdout win replaces the shadow champion. Capital stays off. */
+export async function runChallengerSearch() {
+  const sql = getSql();
+  if (!sql) return { ok: false as const, reason: "database_not_configured" as const, search: null, promoted: false as const, capitalExecutionEnabled: false as const };
+  await ensureResearchMemory();
+  const stored = await loadStoredRuleCard();
+  const labeled = await sql<{ session_date: Date | string }[]>`
+    SELECT DISTINCT d.session_date
+    FROM research_decisions d
+    INNER JOIN research_labels l ON l.decision_id = d.id
+    WHERE d.card_version = ${RESEARCH_CARD_VERSION}
+       OR d.card_version LIKE 'challenger-%'
+  `;
+  const sessionDates = labeled.map((row) => asDay(row.session_date)).filter(Boolean);
+  const readiness = await challengerReadiness();
+  const knob = readiness?.nextKnob ?? "relativeVolume";
+  const rows = sessionDates.length >= MIN_LABELED_SESSIONS ? await loadLearnedRows(stored.card.version) : [];
+  const search: ChallengerSearch<ResearchRuleCard> = chooseChallenger({
+    champion: stored.card,
+    knob,
+    sessionDates,
+    accept: cardWithinBounds,
+    score: (card, dates) => gradeCard(card, dates, rows),
+  });
+  const adoption = shadowAdoption(search);
+  const day = new Date().toISOString().slice(0, 10);
+  let cardVersion: string | null = null;
+  let shadowChampion = false;
+  if (search.card && (adoption.adopt || search.status === "rejected")) {
+    const hashed = cardHash(search.card);
+    cardVersion = `challenger-${search.knob}-${hashed}`;
+    const manifest: ResearchRuleCard = { ...search.card, version: cardVersion };
+    if (!cardWithinBounds(manifest)) {
+      cardVersion = null;
+    } else if (adoption.adopt) {
+      const swapped = await sql<{ adopted: number }[]>`
+        WITH adopted AS (
+          INSERT INTO model_registry (
+            id, model_key, version, role, status, strategy, regime, feature_manifest,
+            promotion_metrics, parent_version, created_at, promoted_at
+          ) VALUES (
+            ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
+            ${RESEARCH_CARD_KEY},
+            ${cardVersion},
+            'champion',
+            'shadow',
+            'penny-analog-rank',
+            'all',
+            ${toJsonb(manifest)}::jsonb,
+            ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false, shadowChampion: true })}::jsonb,
+            ${stored.card.version},
+            now(),
+            now()
+          )
+          ON CONFLICT (model_key, version) DO UPDATE SET
+            role = 'champion',
+            status = 'shadow',
+            promoted_at = COALESCE(model_registry.promoted_at, now()),
+            retired_at = NULL,
+            feature_manifest = excluded.feature_manifest,
+            promotion_metrics = excluded.promotion_metrics,
+            parent_version = excluded.parent_version
+          WHERE model_registry.role <> 'champion' OR model_registry.retired_at IS NOT NULL
+          RETURNING version
+        ),
+        retired AS (
+          UPDATE model_registry
+          SET status = 'retired', retired_at = now()
+          WHERE model_key = ${RESEARCH_CARD_KEY}
+            AND role = 'champion'
+            AND status = 'shadow'
+            AND retired_at IS NULL
+            AND version <> ${cardVersion}
+            AND EXISTS (SELECT 1 FROM adopted)
+          RETURNING version
+        )
+        SELECT (SELECT count(*)::int FROM adopted) AS adopted
+      `;
+      shadowChampion = Number(swapped[0]?.adopted ?? 0) === 1;
+      if (!shadowChampion) throw new Error("shadow_champion_not_adopted");
+    } else {
+      await sql`
+        INSERT INTO model_registry (
+          id, model_key, version, role, status, strategy, regime, feature_manifest,
+          promotion_metrics, parent_version, created_at
+        ) VALUES (
+          ${`model:${RESEARCH_CARD_KEY}:${cardVersion}`},
+          ${RESEARCH_CARD_KEY},
+          ${cardVersion},
+          'challenger',
+          'shadow',
+          'penny-analog-rank',
+          'all',
+          ${toJsonb(manifest)}::jsonb,
+          ${toJsonb({ promoted: false, brokerAuthority: false, capitalExecutionEnabled: false })}::jsonb,
+          ${stored.card.version},
+          now()
+        )
+        ON CONFLICT (model_key, version) DO NOTHING
+      `;
+    }
+  }
+  await sql`
+    INSERT INTO experiment_runs (
+      id, model_key, model_version, experiment_type, status, regime, sample_size,
+      metrics, leakage_checks, cost_assumptions, started_at, completed_at
+    ) VALUES (
+      ${`experiment:research-challenger:${day}`},
+      ${RESEARCH_CARD_KEY},
+      ${cardVersion ?? stored.card.version},
+      'research-challenger',
+      ${search.status},
+      'all',
+      ${sessionDates.length},
+      ${toJsonb({
+        teacher: "delayed-daily-5-session",
+        knob: search.knob,
+        nextKnob: search.nextKnob,
+        reason: search.reason,
+        status: search.status,
+        promoted: false,
+        shadowChampion,
+        capitalExecutionEnabled: false,
+        evidenceClass: "delayed-reference",
+        labeledSessions: sessionDates.length,
+        cardVersion,
+        train: search.train,
+        holdout: search.holdout,
+      })}::jsonb,
+      ${toJsonb({ teacher: "delayed-daily-5-session", holdoutUsedForPromotion: shadowChampion, liveEvidence: false })}::jsonb,
+      ${toJsonb({ capitalExecutionEnabled: false, brokerAuthority: false })}::jsonb,
+      now(),
+      now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      model_version = excluded.model_version,
+      status = excluded.status,
+      sample_size = excluded.sample_size,
+      metrics = excluded.metrics,
+      leakage_checks = excluded.leakage_checks,
+      cost_assumptions = excluded.cost_assumptions,
+      completed_at = now()
+  `;
+  return { ok: true as const, search, promoted: false as const, capitalExecutionEnabled: false as const };
+}

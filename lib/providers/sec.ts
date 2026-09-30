@@ -1,5 +1,5 @@
 import type { FilingEvent } from '@/lib/providers/contracts';
-import { getSecUserAgent } from '@/lib/providers/sec-identity';
+import { secIdentityStatus } from '@/lib/providers/sec-identity';
 
 interface SecSubmissionsResponse {
   cik: string;
@@ -19,7 +19,9 @@ function normalizeCik(cik: string) {
 }
 
 export async function fetchSecRecentFilings(cik: string, forms?: Set<string>): Promise<FilingEvent[]> {
-  const userAgent = getSecUserAgent();
+  const identity = secIdentityStatus();
+  if (!identity.accepted || !identity.agent) throw new Error(identity.reason ?? 'sec_user_agent_rejected');
+  const userAgent = identity.agent;
 
   const normalizedCik = normalizeCik(cik);
   const response = await fetch(`https://data.sec.gov/submissions/CIK${normalizedCik}.json`, {

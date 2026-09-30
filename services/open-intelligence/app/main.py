@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from csv import DictReader
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
@@ -29,6 +30,7 @@ DEFAULT_EDGAR_IDENTITY = (
     "MercuryOS/0.4 personal-research "
     "https://github.com/Mageto369/mercury-os"
 )
+CONTACT_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 
 _ticker_records: dict[str, dict[str, Any]] | None = None
 _cik_records: dict[str, dict[str, Any]] | None = None
@@ -68,6 +70,16 @@ def configure_edgar() -> str:
     return os.getenv("EDGAR_IDENTITY") or os.getenv("SEC_USER_AGENT") or DEFAULT_EDGAR_IDENTITY
 
 
+def require_sec_identity() -> str:
+    identity = configure_edgar()
+    if not CONTACT_EMAIL.search(identity):
+        raise HTTPException(
+            status_code=503,
+            detail="sec_user_agent_rejected: set SEC_USER_AGENT or EDGAR_IDENTITY to a contact string that includes an email address",
+        )
+    return identity
+
+
 def provider_get_json(
     url: str,
     *,
@@ -101,9 +113,8 @@ def provider_get_text(
 
 def sec_headers() -> dict[str, str]:
     return {
-        "User-Agent": configure_edgar(),
+        "User-Agent": require_sec_identity(),
         "Accept-Encoding": "gzip, deflate",
-        "Host": "www.sec.gov",
     }
 
 
@@ -175,7 +186,7 @@ def company_submissions(identifier: str) -> tuple[str, dict[str, Any]]:
     cik, _ = resolve_identifier(identifier)
     payload = provider_get_json(
         SEC_SUBMISSIONS_URL.format(cik=cik),
-        headers=sec_headers() | {"Host": "data.sec.gov"},
+        headers=sec_headers(),
     )
     return cik, payload
 

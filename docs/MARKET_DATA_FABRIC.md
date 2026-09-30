@@ -70,6 +70,6 @@ Float rotation is calculated inside Mercury using the latest persisted share-str
 
 `GET /api/providers/market/status` returns configured adapters and failover preference without exposing credentials.
 
-`POST /api/providers/market/pull` performs a protected market refresh and requires `CRON_SECRET`.
+`POST /api/providers/market/pull` refreshes quotes on the personal-server deployment. Those routes are open on the host; keep the server on a private network. `CRON_SECRET` is not an access check.
 
-The same refresh is performed automatically before the Supervisor fleet on `/api/cron/intelligence`.
+The intelligence cycle syncs the SEC universe before the market pull, then runs the Supervisor fleet on `/api/cron/intelligence`.

@@ -8,6 +8,7 @@ type AutonomyStatus = {
   ok: boolean;
   mode: 'shadow';
   capitalExecutionEnabled: boolean;
+  paperEngineEnabled?: boolean;
   autonomousResearchEnabled: boolean;
   requiredInfrastructureReady: boolean;
   configuredProviders: number;
@@ -76,6 +77,7 @@ export function AutonomyConsole() {
 
     <div className="autonomy-kpis">
       <div><ServerCog size={17}/><span>Research engine</span><strong className={status?.autonomousResearchEnabled ? 'good' : 'danger'}>{status?.autonomousResearchEnabled ? 'ENABLED' : 'OFFLINE'}</strong></div>
+      <div><Activity size={17}/><span>Paper engine</span><strong className={status?.paperEngineEnabled ? 'good' : 'warn'}>{status?.paperEngineEnabled ? 'RUNNING' : 'OFF'}</strong></div>
       <div><LockKeyhole size={17}/><span>Capital execution</span><strong className="warn">{status?.capitalExecutionEnabled ? 'ENABLED' : 'LOCKED'}</strong></div>
       <div><Database size={17}/><span>Provider readiness</span><strong className={configuredPercent >= 80 ? 'good' : configuredPercent >= 40 ? 'warn' : 'danger'}>{configuredPercent}%</strong></div>
       <div><Activity size={17}/><span>Scheduled jobs</span><strong>{status?.jobs.length ?? 0}</strong></div>

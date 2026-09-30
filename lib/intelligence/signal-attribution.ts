@@ -23,6 +23,7 @@ export async function runSignalAttribution(){
     corr(so.normalized_score::numeric,oo.return_1d::numeric) correlation_1d
     FROM signal_observations so
     JOIN opportunity_outcomes oo ON oo.opportunity_id=so.opportunity_id AND oo.matured_60m=true AND oo.return_60m IS NOT NULL
+    JOIN opportunities o ON o.id=so.opportunity_id AND o.model_version IS DISTINCT FROM 'mercury-delayed-reference-v1'
     JOIN securities s ON s.id=so.security_id
     LEFT JOIN setup_fingerprints sf ON sf.opportunity_id=so.opportunity_id
     WHERE s.id NOT LIKE 'validation:%' AND so.opportunity_id IS NOT NULL

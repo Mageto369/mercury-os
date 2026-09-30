@@ -43,8 +43,11 @@ export async function recordAgentHeartbeat(input: {
 export async function getLatestAgentHeartbeats() {
   const db = getDb();
   if (!db) return { persistent: false as const, heartbeats: [] };
-  const rows = await db.select().from(agentHeartbeats).orderBy(desc(agentHeartbeats.observedAt)).limit(250);
-  const latest = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) if (!latest.has(row.agentId)) latest.set(row.agentId, row);
-  return { persistent: true as const, heartbeats: [...latest.values()] };
+  // A global limit hides daily agents once the supervisor writes enough newer beats.
+  // One row per agent, newest first, keeps Replay visible between midnight runs.
+  const rows = await db
+    .selectDistinctOn([agentHeartbeats.agentId])
+    .from(agentHeartbeats)
+    .orderBy(agentHeartbeats.agentId, desc(agentHeartbeats.observedAt));
+  return { persistent: true as const, heartbeats: rows };
 }

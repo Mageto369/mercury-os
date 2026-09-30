@@ -28,24 +28,46 @@ export async function persistMarketSnapshots(
         source: snapshot.source, provider: snapshot.providerPayload ?? {},
         livePull: snapshot.isRealTime,
         evidenceClass: snapshot.isRealTime ? 'live' : 'delayed-reference',
+        tradeAt: snapshot.observedAt.toISOString(),
         ingestedAt,
       },
     }];
   });
   if (!records.length) return 0;
   const inserted = await sql`
-    INSERT INTO market_snapshots
-      (id,security_id,price,volume,dollar_volume,bid,ask,spread_bps,rvol,float_rotation,payload,observed_at)
-    SELECT input.id,input.security_id,input.price,input.volume,input.dollar_volume,
-      input.bid,input.ask,input.spread_bps,input.rvol,input.float_rotation,input.payload,input.observed_at
-    FROM jsonb_to_recordset(convert_from(decode(${toJsonbBase64(records)},'base64'),'utf8')::jsonb)
-      AS input(id text,security_id text,price numeric,volume numeric,dollar_volume numeric,
-        bid numeric,ask numeric,spread_bps integer,rvol numeric,float_rotation numeric,
-        payload jsonb,observed_at timestamptz)
-    WHERE NOT EXISTS (
-      SELECT 1 FROM market_snapshots existing
-      WHERE existing.security_id=input.security_id AND existing.observed_at=input.observed_at
+    WITH input AS (
+      SELECT * FROM jsonb_to_recordset(convert_from(decode(${toJsonbBase64(records)},'base64'),'utf8')::jsonb)
+        AS input(id text,security_id text,price numeric,volume numeric,dollar_volume numeric,
+          bid numeric,ask numeric,spread_bps integer,rvol numeric,float_rotation numeric,
+          payload jsonb,observed_at timestamptz)
+    ),
+    inserted AS (
+      INSERT INTO market_snapshots
+        (id,security_id,price,volume,dollar_volume,bid,ask,spread_bps,rvol,float_rotation,payload,observed_at)
+      SELECT input.id,input.security_id,input.price,input.volume,input.dollar_volume,
+        input.bid,input.ask,input.spread_bps,input.rvol,input.float_rotation,input.payload,input.observed_at
+      FROM input
+      WHERE NOT EXISTS (
+        SELECT 1 FROM market_snapshots existing
+        WHERE existing.security_id=input.security_id AND existing.observed_at=input.observed_at
+          AND existing.payload->>'source'=input.payload->>'source'
+      )
+      RETURNING id
+    ),
+    refreshed AS (
+      UPDATE market_snapshots existing
+      SET payload = jsonb_set(
+        coalesce(existing.payload, '{}'::jsonb),
+        '{ingestedAt}',
+        to_jsonb(input.payload->>'ingestedAt'),
+        true
+      )
+      FROM input
+      WHERE existing.security_id=input.security_id
+        AND existing.observed_at=input.observed_at
         AND existing.payload->>'source'=input.payload->>'source'
-    ) RETURNING id`;
+      RETURNING existing.id
+    )
+    SELECT id FROM inserted`;
   return inserted.length;
 }

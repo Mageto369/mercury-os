@@ -148,6 +148,26 @@
 /* ---------- density and legibility ---------- */
 
 /* Figures that sit in columns must not jitter between renders. */
+.price-spark { display: block; }
+.price-spark.good { color: var(--green); }
+.price-spark.danger { color: var(--red); }
+.history-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 18px; margin: 8px 0 14px; }
+.rise-room { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 12px; }
+.rise-room > span { color: var(--muted); }
+.rise-room button { border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.rise-room button b { margin-left: 6px; }
+.daily-ten { margin: 0 0 14px; }
+.daily-ten-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.daily-ten button { display: grid; gap: 2px; text-align: left; border: 1px solid var(--line2); background: var(--panel); color: var(--text); border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+.daily-ten button.selected { border-color: var(--green); }
+.daily-ten button span, .daily-ten button small { color: var(--muted); font-size: 11px; }
+.daily-ten button strong { font-size: 16px; }
+@media (max-width: 900px) { .daily-ten-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.history-strip .price-spark { width: 140px; height: 36px; }
+.history-strip div { display: grid; gap: 2px; }
+.history-strip span { color: var(--muted); font-size: 11px; }
+.history-table { margin-top: 8px; }
+
 .command-table td,
 .kpi strong,
 .metric-row b,

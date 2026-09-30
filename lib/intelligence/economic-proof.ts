@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { getSql } from '@/lib/db';
+import { DELAYED_REFERENCE_MODEL } from '@/lib/market/research-quotes';
 import { countSurvivors, summarizeProvenance } from '@/lib/performance/provenance';
 import { toJsonb } from '@/lib/db/json';
 
@@ -31,7 +32,9 @@ export async function evaluateEconomicProof() {
     select oo.return_60m::float r, oo.security_id
     from opportunity_outcomes oo
     join securities s on s.id = oo.security_id
+    join opportunities o on o.id = oo.opportunity_id
     where oo.matured_60m and s.id not like 'validation:%'
+      and o.model_version is distinct from ${DELAYED_REFERENCE_MODEL}
     order by oo.evaluated_at desc
     limit 5000
   `;

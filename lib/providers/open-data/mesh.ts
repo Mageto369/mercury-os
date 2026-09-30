@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getSql } from '@/lib/db';
 import { bootstrapOpenDataMesh } from '@/lib/db/bootstrap-open-data';
-import { getSecUserAgent } from '@/lib/providers/sec-identity';
+import { secIdentityStatus } from '@/lib/providers/sec-identity';
+import { syncShareStructureFromCompanyFacts } from '@/lib/providers/open-data/share-structure-facts';
 
 function cik10(cik: string) { return cik.replace(/\D/g, '').padStart(10, '0').slice(-10); }
 function hash(value: unknown) { return createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
@@ -28,7 +29,9 @@ async function health(provider: string, configured: boolean, authoritative: bool
 export async function pullSecCompanyFacts(limit = 25) {
   const sql = getSql(); if (!sql) return { ok:false as const, reason:'database_not_configured' as const };
   await bootstrapOpenDataMesh();
-  const ua = getSecUserAgent(); const started = Date.now();
+  const identity = secIdentityStatus();
+  if (!identity.accepted || !identity.agent) return { ok:false as const, reason:'sec_user_agent_rejected' as const, detail: identity.reason };
+  const ua = identity.agent; const started = Date.now();
   // Prefer companies we have never ingested and de-duplicate share classes that
   // point at the same CIK. This lets successive cycles advance through the
   // universe instead of requesting the same alphabetic prefix forever.
@@ -92,7 +95,8 @@ export async function pullSecCompanyFacts(limit = 25) {
     } catch (e) { errors.push(e instanceof Error ? e.message : 'sec_companyfacts_failed'); }
   }
   await health('sec-companyfacts', true, true, {ok: inserted>0 || errors.length===0, latencyMs:Date.now()-started, records:inserted, error:errors[0]});
-  return {ok: errors.length < rows.length, provider:'sec-companyfacts', authoritative:true, inserted, errors, mode:'shadow' as const, capitalExecutionEnabled:false as const};
+  const shareStructure = await syncShareStructureFromCompanyFacts();
+  return {ok: errors.length < rows.length, provider:'sec-companyfacts', authoritative:true, inserted, shareStructure, errors, mode:'shadow' as const, capitalExecutionEnabled:false as const};
 }
 
 export async function pullFinraRegSho(limit = 5000) {
